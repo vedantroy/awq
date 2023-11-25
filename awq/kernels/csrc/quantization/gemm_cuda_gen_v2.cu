@@ -84,6 +84,8 @@ __global__ void __launch_bounds__(128)
 
   float C_warp[64];
 
+
+  // TODO: Extra 128 * 8 halfs of storage. Why?
   __shared__ half A_shared[128 * (32 + 8)];
   __shared__ half B_shared[64 * (32 + 8)];
   
@@ -141,7 +143,7 @@ __global__ void __launch_bounds__(128)
   int matrixRowsPerGridRow = 128;
   int gridRowIdx = blockIdxInGrid / gridWidthBlocks;
   // 0, 128, 256, etc.
-  int matrixRowIdx = gridRowIdx * matrixRowsPerGridRow;
+  int gridRowIdxAsMatrixRowIdx = gridRowIdx * matrixRowsPerGridRow;
 
   static constexpr int threadsPerWarp = 32;
   static constexpr int rowsPerWarp = 8; // (32 * 8) / 32
@@ -154,7 +156,8 @@ __global__ void __launch_bounds__(128)
   // warp 0, thd 4..7 => row 1
   // warp 0, thd 31 => row 7
   // warp 3, thd 31 => (3 * 8 + floor(7.75)) = 24 + 7 = row 31
-  int ld_A_row = (matrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
+  int ld_A_row = (gridRowIdxAsMatrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
+  assert(blockIdxInGrid != 0 || (0 <= ld_A_row && ld_A_row <= 31));
 
 
   half* A_ptr = A
@@ -230,14 +233,15 @@ __global__ void __launch_bounds__(128)
     // TODO: Haotian: Here we assume M % cta_M = 0.
     for (int ax0_ax1_fused_0 = 0; ax0_ax1_fused_0 < 4; ++ax0_ax1_fused_0) 
     {
-      if (ld_A_row + ax0_ax1_fused_0 * row_stride_A < M)
-      {
-        *(uint4*)(A_shared_ptr + ax0_ax1_fused_0 * row_stride_A * 40) = *(uint4*)(A_ptr + (ax0_ax1_fused_0 * row_stride_A * IC) + (k_0_0 * 32));
-      }
-      else
-      {
-        *(uint4*)(A_shared_ptr + ax0_ax1_fused_0 * row_stride_A * 40) = make_uint4(0, 0, 0, 0);
-      }
+      int rowOffset = ax0_ax1_fused_0 * row_stride_A;
+      assert(0 <= rowOffset && rowOffset < 32 * 4 && rowOffset % 32 == 0);
+      // (128 thread * 4 iters * 16 bytes) / 2
+      // uint4 = 16 bytes
+      // half = 2 bytes
+      *(uint4*)(A_shared_ptr + rowOffset * 40) = 
+          (ld_A_row + rowOffset < M) 
+          ? *(uint4*)(A_ptr + (rowOffset * IC) + (k_0_0 * 32)) 
+          : make_uint4(0, 0, 0, 0);
     }
 
 
