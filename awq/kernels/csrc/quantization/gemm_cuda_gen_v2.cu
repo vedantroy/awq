@@ -15,6 +15,13 @@ Shang and Dang, Xingyu and Han, Song}, journal={arXiv}, year={2023}
 #include <torch/extension.h>
 
 #define ASSERT_IF(cond, check) assert(!(cond) || (check))
+#define FANCY_ASSERT_IF(cond, lhs, rhs) \
+    do { \
+        if ((cond) && !((lhs) rhs)) { \
+            printf("Assertion failed: %d is wrong for %s\n", lhs, #lhs); \
+            assert(0); \
+        } \
+    } while(0)
 
 // Pack two half values.
 static inline __device__ __host__ unsigned __pack_half2(const half x,
@@ -145,10 +152,11 @@ __global__ void __launch_bounds__(128)
   int gridRowIdx = blockIdxInGrid / gridWidthBlocks;
   // 0, 128, 256, etc.
   int gridRowIdxAsMatrixRowIdx = gridRowIdx * matrixRowsPerGridRow;
+  assert(gridRowIdxAsMatrixRowIdx % 128 == 0);
 
   static constexpr int threadsPerWarp = 32;
   static constexpr int rowsPerWarp = 8; // (32 * 8) / 32
-  static constexpr int threadsPerRow = threadsPerWarp / rowsPerWarp;
+  static constexpr int threadsPerRow = threadsPerWarp / rowsPerWarp; // 4
 
   int warpIdx = threadIdx.y;
 
@@ -159,6 +167,9 @@ __global__ void __launch_bounds__(128)
   // warp 3, thd 31 => (3 * 8 + floor(7.75)) = 24 + 7 = row 31
   int ld_A_row = (gridRowIdxAsMatrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
   ASSERT_IF(blockIdxInGrid == 0, (0 <= ld_A_row && ld_A_row <= 31));
+
+  #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0
+  FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ld_A_row, == 0);
 
 
   half* A_ptr = A
@@ -236,7 +247,8 @@ __global__ void __launch_bounds__(128)
     {
       int rowOffset = ax0_ax1_fused_0 * row_stride_A;
       assert(0 <= rowOffset && rowOffset < 32 * 4 && rowOffset % 32 == 0);
-      ASSERT_IF(blockIdxInGrid == 0 && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32 == 0));
+      // ASSERT_IF(blockIdxInGrid == 0 && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32 == 0));
+      FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32), == 0);
       // (128 thread * 4 iters * 16 bytes) / 2
       // uint4 = 16 bytes
       // half = 2 bytes
@@ -363,10 +375,6 @@ __global__ void __launch_bounds__(128)
                       "r"(bSharedPtr[0]), "r"(bSharedPtr[1]), 
                       "f"(cWarpPtr1[0]), "f"(cWarpPtr1[1]), "f"(cWarpPtr1[2]), "f"(cWarpPtr1[3])
                 );
-
-                // Are these 2 lines the same?
-                // float* cWarpPtr2 = (float *)(C_warp + cWarpBaseIndex + 4);
-                // unsigned* bSharedPtrOffset = (unsigned *)(B_shared_warp + (warpCol * 8) + 4);
 
                 unsigned* bSharedPtrOffset = bSharedPtr + 2;
                 float* cWarpPtr2 = cWarpPtr1 + 4;
