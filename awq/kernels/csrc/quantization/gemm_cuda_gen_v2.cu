@@ -14,6 +14,8 @@ Shang and Dang, Xingyu and Han, Song}, journal={arXiv}, year={2023}
 #include <cuda_fp16.h>
 #include <torch/extension.h>
 
+#define ASSERT_IF(cond, check) assert(!(cond) || (check))
+
 // Pack two half values.
 static inline __device__ __host__ unsigned __pack_half2(const half x,
                                                         const half y) {
@@ -137,7 +139,6 @@ __global__ void __launch_bounds__(128)
   const int sf_w = zeros_w * 8;
 
   // bool ld_zero_flag = (threadIdx.y * 32 + threadIdx.x) * 8 < 64;
-  // int ld_A_row = (blockIdx_y / j_factors1 * 128 + threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32);     // threadIdx.y is warp_id
   // bool wb_C_flag = (threadIdx.x / 4) < M;
 
   int matrixRowsPerGridRow = 128;
@@ -157,7 +158,7 @@ __global__ void __launch_bounds__(128)
   // warp 0, thd 31 => row 7
   // warp 3, thd 31 => (3 * 8 + floor(7.75)) = 24 + 7 = row 31
   int ld_A_row = (gridRowIdxAsMatrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
-  assert(blockIdxInGrid != 0 || (0 <= ld_A_row && ld_A_row <= 31));
+  ASSERT_IF(blockIdxInGrid == 0, (0 <= ld_A_row && ld_A_row <= 31));
 
 
   half* A_ptr = A
@@ -235,6 +236,7 @@ __global__ void __launch_bounds__(128)
     {
       int rowOffset = ax0_ax1_fused_0 * row_stride_A;
       assert(0 <= rowOffset && rowOffset < 32 * 4 && rowOffset % 32 == 0);
+      ASSERT_IF(blockIdxInGrid == 0 && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32 == 0));
       // (128 thread * 4 iters * 16 bytes) / 2
       // uint4 = 16 bytes
       // half = 2 bytes
