@@ -32,6 +32,12 @@ __host__ int divide_round_up(int c, int divisor) {
   return (c + divisor - 1) / divisor;
 }
 
+__device__ __forceinline__ int divide_round_up_gpu(int c, int divisor){
+  // Same thing as ceil(float(c) / float(divisor))
+  return (c + divisor - 1) / divisor;
+}
+
+
 // w/ new kernel
 // G = group_size (I believe its the quantization group size)
 template <int G>
@@ -87,9 +93,21 @@ __global__ void __launch_bounds__(128)
   // # of blocks of 64 required to cover OC
   int j_factors1 = ((OC + 64 - 1) / 64);
 
+  int gridWidthBlocks = divide_round_up_gpu(OC, 64);
+  int gridHeightBlocks = divide_round_up_gpu(M, 128);
+  int blocksPerGrid = gridHeightBlocks * gridWidthBlocks;
+  int blockIdxInGrid = blockIdx.x % blocksPerGrid;
+  int gridIdx = blockIdx.x / blocksPerGrid;
+
+
   int blockIdx_x = 0;
   int blockIdx_y = blockIdx.x % ((M + 128 - 1) / 128 * j_factors1);
   int blockIdx_z = blockIdx.x / ((M + 128 - 1) / 128 * j_factors1);
+
+  assert(j_factors1 == divide_round_up_gpu(OC, 64));
+  assert(blockIdx_y == blockIdx.x % (divide_round_up_gpu(M, 128) * j_factors1));
+  assert(blockIdx_z == blockIdx.x / (divide_round_up_gpu(M, 128) * j_factors1));
+
   
   // 01 02 03 04 05 06 07 08 (used for 2 mmas)
   // 01 02 03 04 05 06 07 08 ^
@@ -117,12 +135,49 @@ __global__ void __launch_bounds__(128)
   const int sf_w = zeros_w * 8;
 
   // bool ld_zero_flag = (threadIdx.y * 32 + threadIdx.x) * 8 < 64;
-  int ld_A_row = (blockIdx_y / j_factors1 * 128 + threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32);     // threadIdx.y is warp_id
+  // int ld_A_row = (blockIdx_y / j_factors1 * 128 + threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32);     // threadIdx.y is warp_id
   // bool wb_C_flag = (threadIdx.x / 4) < M;
+
+  int matrixRowsPerGridRow = 128;
+  int gridRowIdx = blockIdxInGrid / gridWidthBlocks;
+  // 0, 128, 256, etc.
+  int matrixRowIdx = gridRowIdx * matrixRowsPerGridRow;
+
+  static constexpr int threadsPerWarp = 32;
+  static constexpr int rowsPerWarp = 8; // (32 * 8) / 32
+  static constexpr int threadsPerRow = threadsPerWarp / rowsPerWarp;
+
+  int warpIdx = threadIdx.y;
+
+  // if block 0,
+  // warp 0, thd 0..3 => row 0
+  // warp 0, thd 4..7 => row 1
+  // warp 0, thd 31 => row 7
+  // warp 3, thd 31 => (3 * 8 + floor(7.75)) = 24 + 7 = row 31
+  // int ld_A_row = (blockIdx_y / j_factors1 * 128 + threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32);     // threadIdx.y is warp_id
+  int ld_A_row = (matrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);     // threadIdx.y is warp_id
+  // if ((blockIdx_y / j_factors1 * 128) != matrixRowIdx) {
+  //   printf("blockIdx_y: %d, j_factors1: %d, matrixRowIdx: %d, warpIdx: %d, threadIdx.x: %d, threadIdx.y: %d, ld_A_row: %d, ld_A_row_new: %d\n", blockIdx_y, j_factors1, matrixRowIdx, warpIdx, threadIdx.x, threadIdx.y, ld_A_row, ld_A_row_new);
+  //   assert(false);
+  // }
+  // if ((threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32) != (warpIdx * threadsPerWarp + threadIdx.x / threadsPerRow)) {
+  //   printf("threadIdx.y: %d, row_stride_warp: %d, threadIdx.x: %d, threadsPerWarp: %d, threadIdx.x / threadsPerRow: %d, warpIdx: %d, threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32: %d, warpIdx * threadsPerWarp + threadIdx.x / threadsPerRow: %d\n", threadIdx.y, row_stride_warp, threadIdx.x, threadsPerWarp, threadIdx.x / threadsPerRow, warpIdx, threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32, warpIdx * threadsPerWarp + threadIdx.x / threadsPerRow);
+  //   assert(false);
+  // }
+
 
   half* A_ptr = A 
                 + (((int)blockIdx_y) / j_factors1 * 128 + (((int)threadIdx.y) * row_stride_warp) + ((int)threadIdx.x) / (32 / 8)) * IC
                 + (((int)threadIdx.x) % (32 / 8)) * 8;
+  // half* A_ptr = A
+  //               + (
+  //                 matrixRowIdx
+  //                 + warpIdx * rowsPerWarp
+  //                 + threadIdx.x / threadsPerRow
+  //               ) * IC
+  //               // TODO: This is an annoying line
+  //               // NO idea what it means
+  //               + (threadIdx.x % threadsPerRow) * 8;
   
   int* B_ptr = B
             + ((int)threadIdx.y) * (IC / 8) * 8
