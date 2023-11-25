@@ -154,30 +154,14 @@ __global__ void __launch_bounds__(128)
   // warp 0, thd 4..7 => row 1
   // warp 0, thd 31 => row 7
   // warp 3, thd 31 => (3 * 8 + floor(7.75)) = 24 + 7 = row 31
-  // int ld_A_row = (blockIdx_y / j_factors1 * 128 + threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32);     // threadIdx.y is warp_id
-  int ld_A_row = (matrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);     // threadIdx.y is warp_id
-  // if ((blockIdx_y / j_factors1 * 128) != matrixRowIdx) {
-  //   printf("blockIdx_y: %d, j_factors1: %d, matrixRowIdx: %d, warpIdx: %d, threadIdx.x: %d, threadIdx.y: %d, ld_A_row: %d, ld_A_row_new: %d\n", blockIdx_y, j_factors1, matrixRowIdx, warpIdx, threadIdx.x, threadIdx.y, ld_A_row, ld_A_row_new);
-  //   assert(false);
-  // }
-  // if ((threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32) != (warpIdx * threadsPerWarp + threadIdx.x / threadsPerRow)) {
-  //   printf("threadIdx.y: %d, row_stride_warp: %d, threadIdx.x: %d, threadsPerWarp: %d, threadIdx.x / threadsPerRow: %d, warpIdx: %d, threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32: %d, warpIdx * threadsPerWarp + threadIdx.x / threadsPerRow: %d\n", threadIdx.y, row_stride_warp, threadIdx.x, threadsPerWarp, threadIdx.x / threadsPerRow, warpIdx, threadIdx.y * row_stride_warp + threadIdx.x * 8 / 32, warpIdx * threadsPerWarp + threadIdx.x / threadsPerRow);
-  //   assert(false);
-  // }
+  int ld_A_row = (matrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
 
 
-  half* A_ptr = A 
-                + (((int)blockIdx_y) / j_factors1 * 128 + (((int)threadIdx.y) * row_stride_warp) + ((int)threadIdx.x) / (32 / 8)) * IC
-                + (((int)threadIdx.x) % (32 / 8)) * 8;
-  // half* A_ptr = A
-  //               + (
-  //                 matrixRowIdx
-  //                 + warpIdx * rowsPerWarp
-  //                 + threadIdx.x / threadsPerRow
-  //               ) * IC
-  //               // TODO: This is an annoying line
-  //               // NO idea what it means
-  //               + (threadIdx.x % threadsPerRow) * 8;
+  half* A_ptr = A
+                + ld_A_row * IC
+                // TODO: This is an annoying line
+                // NO idea what it means
+                + (threadIdx.x % threadsPerRow) * 8;
   
   int* B_ptr = B
             + ((int)threadIdx.y) * (IC / 8) * 8
