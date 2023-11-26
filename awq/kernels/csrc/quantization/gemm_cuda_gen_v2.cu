@@ -108,7 +108,7 @@ __global__ void __launch_bounds__(128)
   int gridHeightBlocks = divide_round_up_gpu(M, 128);
   int blocksPerGrid = gridHeightBlocks * gridWidthBlocks;
   int blockIdxInGrid = blockIdx.x % blocksPerGrid;
-  int gridIdx = blockIdx.x / blocksPerGrid;
+  int gridSplitIdx = blockIdx.x / blocksPerGrid;
 
 
   int blockIdx_x = 0;
@@ -168,7 +168,8 @@ __global__ void __launch_bounds__(128)
   int ld_A_row = (gridRowIdxAsMatrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
   ASSERT_IF(blockIdxInGrid == 0, (0 <= ld_A_row && ld_A_row <= 31));
 
-  #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0
+  #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0 && gridSplitIdx == 0
+  #define FIRST_EVERYTHING (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0)
   FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ld_A_row, == 0);
 
 
@@ -239,6 +240,10 @@ __global__ void __launch_bounds__(128)
   
   // TODO (Haotian): load scales and zero points to smem
 
+  if (FIRST_EVERYTHING) {
+    printf("k_bound: %d, g_width_blks: %d\n", k_bound, gridWidthBlocks);
+  }
+
   for (int _k_0_0 = 0; _k_0_0 < k_bound; ++_k_0_0) {
     int k_0_0 = _k_0_0 * split_k_iters + blockIdx_z;
     __syncthreads();
@@ -247,8 +252,16 @@ __global__ void __launch_bounds__(128)
     {
       int rowOffset = ax0_ax1_fused_0 * row_stride_A;
       assert(0 <= rowOffset && rowOffset < 32 * 4 && rowOffset % 32 == 0);
-      // ASSERT_IF(blockIdxInGrid == 0 && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32 == 0));
       FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32), == 0);
+
+      half* base = A;
+      half* target = A_ptr + (rowOffset * IC) + (k_0_0 * 32);
+
+      if (base <= target && target < base + 24) {
+        printf("blk: %d, g_blk: %d, g_row: %d, g_split %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
+          blockIdx.x, blockIdxInGrid, gridRowIdx, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
+      }
+
       // (128 thread * 4 iters * 16 bytes) / 2
       // uint4 = 16 bytes
       // half = 2 bytes
