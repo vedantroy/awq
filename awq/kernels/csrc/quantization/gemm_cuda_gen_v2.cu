@@ -372,11 +372,28 @@ __global__ void __launch_bounds__(128)
         for (int i = 0; i < 32; i++) {
           assert(A_shared[i] == A[i]);
         }
-        // load the last (128th) row of A_shared and ensure it matches
-        // the first 32 elements from the 128th row of A
-        // for (int i = 0; i < 32; i++) {
-        //   assert(A_shared[128 * 40 + i] == A[128 * IC + i]);
-        // }
+
+        // ensure A_shared is equal to a 128x32 chunk of A
+        // (w/ zero padding)
+        bool failed = false;
+        for (int i = 0; i < M; ++i) {
+          for (int j = 0; j < 32; ++j) {
+            if (A_shared[i * 40 + j] !=  A[i * IC + j]) {
+              printf("i: %d, j: %d, A_shared: %f, A: %f\n", i, j, __half2float(A_shared[i * 40 + j]), __half2float(A[i * IC + j]));
+              failed = true;
+            }
+          }
+        }
+        // Ensure zero padding works
+        for (int i = M; i < 128; ++i) {
+          for (int j = 0; j < 32; ++j) {
+            if (A_shared[i * 40 + j] != __float2half(0)) {
+              printf("i: %d, j: %d, A_shared: %f\n", i, j, __half2float(A_shared[i * 40 + j]));
+              failed = true;
+            }
+          }
+        }
+        assert(!failed);
       }
     }
 
