@@ -139,12 +139,12 @@ __global__ void __launch_bounds__(128)
 
    // for debugging, set everything to 0
    for (int i = 0; i < 128 * (32 + 8); i++) {
-     A_shared[i] = __float2half(0.0);
+     A_shared[i] = __float2half(-1.0);
    }
    __syncthreads();
    if (threadIdx.x == 0 && threadIdx.y == 0) {
     for (int i = 0; i < 128 * (32 + 8); i++) {
-      assert(A_shared[i] == __float2half(0.0));
+      assert(A_shared[i] == __float2half(-1.0));
     }
    }
 
@@ -360,7 +360,7 @@ __global__ void __launch_bounds__(128)
       if (threadIdx.x == 0 && threadIdx.y == 0) {
           for (int i = 0; i < 128; i++) {
             for (int j = 32; j < 40; j++) {
-              assert(A_shared[i * 40 + j] == __float2half(0.0));
+              assert(A_shared[i * 40 + j] == __float2half(-1.0));
             }
           }
       }
