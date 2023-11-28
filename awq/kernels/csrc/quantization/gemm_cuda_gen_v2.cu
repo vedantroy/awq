@@ -194,8 +194,6 @@ __global__ void __launch_bounds__(128)
 
   half* A_ptr = A
                 + ld_A_row * IC
-                // TODO: This is an annoying line
-                // NO idea what it means
                 + (threadIdx.x % threadsPerRow) * 8;
 
   // All threads have an initial offset 
@@ -211,10 +209,9 @@ __global__ void __launch_bounds__(128)
 // Why * 1 in the above line?
                         
   half* A_shared_ptr = A_shared 
-                    + ((int)threadIdx.y) * row_stride_warp * (32 + 8) 
-
-                    + (((int)threadIdx.x) / (32 / 8)) * (32 + 8)
-                    + (((int)threadIdx.x) % (32 / 8) ) * 8;
+                    + warpIdx * rowsPerWarp * (32 + 8) 
+                    + (threadIdx.x / threadsPerRow) * (32 + 8)
+                    + (threadIdx.x % threadsPerRow) * 8;
 
 
   int row_index_in_shared = threadIdx.y * row_stride_warp;
@@ -323,7 +320,7 @@ __global__ void __launch_bounds__(128)
 
       assert(rowOffset == 0 || rowOffset == 32 || rowOffset == 32 * 2 || rowOffset == 32 * 3);
 
-      half* dest_target = A_shared_ptr + rowOffset * 40
+      half* dest_target = A_shared_ptr + rowOffset * 40;
       int target_off = dest_target - A_shared;
       ASSERT_IF(warpIdx == 0 && threadIdx.x == 0, target_off == 0 +  rowOffset * 40);
       ASSERT_IF(warpIdx == 0 && threadIdx.x == 1, target_off == 8 +  rowOffset * 40);
