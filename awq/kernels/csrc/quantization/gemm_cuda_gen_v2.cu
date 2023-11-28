@@ -153,23 +153,13 @@ __global__ void __launch_bounds__(128)
   // A matrix of size (64 x 32) (w/ 8 bytes of padding on the right hand side)
   // for block 0, split 0
   // warp 0:
-  // thd 0
-  //     (0..32.., 0) ->  (0..32, 0)
-  // thd 1
-  //     (0..32.., 8) ->  (0..32, 8)
-  // thd 4
-  //     (1..33.., 0) ->  (1..33, 0)
-  // thd 31
-  //     (7..39.., 24) ->  (7..39, 24)
-  // warp 1:
-  // thd 0
-  //     (8..40.., 0) ->  (0..8, 0)
+  //   thd 0: -> (0..32, 0)
+  //   thd 1: -> (0..32, 8)
+  //   thd 4: -> (1..33, 0)
   // warp 3:
-  // thd 0
-  //     (24..56..32*3+24=120, 0) ->  (24..56..120, 0)
-  // thd 31
-  //     (31..63..32*3+31=127, 24) -> (31..63..127, 24)
-  // thd 0 loads elements from 
+  //   thd 0: ->  (24..56, 0)
+  //   thd 31: -> (24+7=31..56+7=63, 24)
+
   __shared__ half B_shared[64 * shared_stride];
   
   // __shared__ half scaling_factors_shared[64];
@@ -438,7 +428,7 @@ __global__ void __launch_bounds__(128)
         B_loaded_fp16[ic_1] = dequantized_weight;  
       }
       // write back
-      *(uint4*)(B_shared_ptr + ax0_ax1_fused_0 * row_stride * (32 + 8)) = *reinterpret_cast<uint4*>(B_loaded_fp16);
+      *(uint4*)(B_shared_ptr + ax0_ax1_fused_0 * row_stride * shared_stride) = *reinterpret_cast<uint4*>(B_loaded_fp16);
     }
     __syncthreads();
     // Load values from shared memory (A_shared) to registers (A_shared_warp)
