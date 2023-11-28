@@ -249,16 +249,6 @@ __global__ void __launch_bounds__(128)
                       + (threadIdx.x % threadsPerRow) * 8;
   half* A_shared_ptr = A_shared + sharedOffset;
   half* B_shared_ptr = B_shared + sharedOffset;
-
-  // half* A_shared_ptr = A_shared 
-  //                   + warpIdx * rowsPerWarp *  shared_stride
-  //                   + (threadIdx.x / threadsPerRow) * shared_stride
-  //                   + (threadIdx.x % threadsPerRow) * 8;
-
-  // half* B_shared_ptr = B_shared
-  //                   + warpIdx * rowsPerWarp * shared_stride
-  //                   + (threadIdx.x / threadsPerRow) * shared_stride
-  //                   + (threadIdx.x % threadsPerRow) * 8;
   
 
   int* zeros_ptr = zeros
