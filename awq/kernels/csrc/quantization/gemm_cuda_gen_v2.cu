@@ -108,13 +108,40 @@ __global__ void __launch_bounds__(128)
   // warp 3 starts @ 24 * 40
   //  thd 0..3   =>   seg offset = 0 * 40
   //  thd 28..31 =>   seg offset = 7 * 40
-  //   thd 28 => 0 + (7 + 24) * 40, 0 + (7 + 24 + 32) * 40, 0 + (7 + 24 + 64) * 40, 0 + (7 + 24 + 96) * 40
+  //  thd 28 => 0 + (7 + 24) * 40, 0 + (7 + 24 + 32) * 40, 0 + (7 + 24 + 64) * 40, 0 + (7 + 24 + 96) * 40
 
-  // k split shifts all threads to the right by 8 * 32 elements
-  // but all threads are still within 32 columns of each other
-  // A matrix of size (32 by 4)
+  // k split shifts all threads to the right by 8 (# of splits) * 32 columns
+  // but all threads are still always within 32 columns of each other
+
+  // A matrix of size (128 x 32) (w/ 8 bytes of padding)
+  // for block 0, split 0
+  // warp 0:
+  // thd 0
+  //     (0..32.., 0) ->  (0..32, 0)
+  // thd 1
+  //     (0..32.., 8) ->  (0..32, 8)
+  // thd 4
+  //     (1..33.., 0) ->  (1..33, 0)
+  // thd 31
+  //     (7..39.., 24) ->  (7..39, 24)
+  // warp 1:
+  // thd 0
+  //     (8..40.., 0) ->  (0..8, 0)
+  // warp 3:
+  // thd 0
+  //     (24..56..32*3+24=120, 0) ->  (24..56..120, 0)
+  // thd 31
+  //     (31..63..32*3+31=127, 24) -> (31..63..127, 24)
+  // thd 0 loads elements from 
+
 
   __shared__ half A_shared[128 * (32 + 8)];
+
+   // int tid = threadIdx.x + blockIdx.x * blockDim.x;
+   // if (tid < 128 * (32 + 8)) {
+   //     A_shared[tid] = __float2half(0.0);
+   // }
+
   __shared__ half B_shared[64 * (32 + 8)];
   
   // __shared__ half scaling_factors_shared[64];
