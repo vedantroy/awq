@@ -232,7 +232,11 @@ __global__ void __launch_bounds__(128)
   // warp 0, thd 4..7 => row 1
   // warp 0, thd 31 => row 7
   // warp 3, thd 31 => (3 * 8 + floor(7.75)) = 24 + 7 = row 31
-  int ld_A_row = (gridRowIdxAsMatrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
+  int ld_A_row = (
+        gridRowIdxAsMatrixRowIdx 
+        + warpIdx * rowsPerWarp 
+        + threadIdx.x / threadsPerRow
+  );
   ASSERT_IF(blockIdxInGrid == 0, (0 <= ld_A_row && ld_A_row <= 31));
 
   #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0
@@ -248,10 +252,12 @@ __global__ void __launch_bounds__(128)
   assert(((A_ptr - A) % IC) <= ((threadsPerRow - 1) * 8));
   
   int* B_ptr = B
-            + ((int)threadIdx.y) * (IC / 8) * 8
-            + (((int)threadIdx.x) / (32 / 8)) * (IC / 8)
-            + (((int)blockIdx_y) % j_factors1) * 64 * (IC / 8)
-            + (((int)threadIdx.x) % (32 / 8)) * 1;
+              + (
+                blockIdxInGrid * 64
+                + warpIdx * rowsPerWarp
+                + threadIdx.x / threadsPerRow
+              ) * (IC / 8)
+             + (threadIdx.x % threadsPerRow);
   
 // Why * 1 in the above line?
 
