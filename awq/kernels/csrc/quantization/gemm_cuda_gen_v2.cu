@@ -149,6 +149,27 @@ __global__ void __launch_bounds__(128)
     }
    }
 
+
+  // A matrix of size (64 x 32) (w/ 8 bytes of padding on the right hand side)
+  // for block 0, split 0
+  // warp 0:
+  // thd 0
+  //     (0..32.., 0) ->  (0..32, 0)
+  // thd 1
+  //     (0..32.., 8) ->  (0..32, 8)
+  // thd 4
+  //     (1..33.., 0) ->  (1..33, 0)
+  // thd 31
+  //     (7..39.., 24) ->  (7..39, 24)
+  // warp 1:
+  // thd 0
+  //     (8..40.., 0) ->  (0..8, 0)
+  // warp 3:
+  // thd 0
+  //     (24..56..32*3+24=120, 0) ->  (24..56..120, 0)
+  // thd 31
+  //     (31..63..32*3+31=127, 24) -> (31..63..127, 24)
+  // thd 0 loads elements from 
   __shared__ half B_shared[64 * shared_stride];
   
   // __shared__ half scaling_factors_shared[64];
@@ -540,6 +561,12 @@ __global__ void __launch_bounds__(128)
   }
 }
 
+// in_feats: M, IC [float16]
+// kernel: IC, OC // 8 [int32] -> cast to IC, OC [uint4b]
+// scaling_factors: IC // G, OC [float16]
+// zeros: IC // G, OC // 8 [int32] -> cast to IC // G, OC [uint4b]
+// assume that batch_size < 16 for now
+
 torch::Tensor gemm_forward_cuda2(
     torch::Tensor _in_feats,
     torch::Tensor _kernel,
@@ -548,7 +575,6 @@ torch::Tensor gemm_forward_cuda2(
     int group_size,
     int split_k_iters)
 {
-    printf("ksize: %d, %d\n", _kernel.size(0), _kernel.size(1));
 
     int num_in_feats = _in_feats.size(0);
     int num_in_channels = _in_feats.size(1);
@@ -586,6 +612,10 @@ torch::Tensor gemm_forward_cuda2(
     // spawn enough blocks s.t there's a thread for each row (128 threads / block) and thread for every 64 columns
     assert(exp_num_blocks == divide_round_up(num_out_feats, 128) * (num_out_channels / 64) * split_k_iters);
     printf("n_block: %d, n_thread: %d, n_out (no_k): %d, n_out: %d\n", exp_num_blocks, exp_num_blocks * 128, num_out_feats * num_out_channels, num_out_feats * num_out_channels * split_k_iters);
+
+    printf("ksize: %d, %d\n", _kernel.size(0), _kernel.size(1));
+    assert(_kernel.size(0) == num_in_channels 
+            && _kernel.size(1) == num_out_channels / 8);
 
     
     // threadIdx.x: 32
