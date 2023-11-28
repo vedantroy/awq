@@ -137,7 +137,7 @@ __global__ void __launch_bounds__(128)
 
   __shared__ half A_shared[128 * (32 + 8)];
 
-   // for debugging, set everything to 0
+   // for debugging, set everything to -1
    for (int i = 0; i < 128 * (32 + 8); i++) {
      A_shared[i] = __float2half(-1.0);
    }
@@ -363,6 +363,19 @@ __global__ void __launch_bounds__(128)
               assert(A_shared[i * 40 + j] == __float2half(-1.0));
             }
           }
+      }
+
+      if (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0 && k_0_0 == 0) {
+        // load the first 32 elements from A_shared and ensure
+        // they match the first 32 elements from A
+        for (int i = 0; i < 32; i++) {
+          assert(A_shared[i] == A[i]);
+        }
+        // load the last (128th) row of A_shared and ensure it matches
+        // the first 32 elements from the 128th row of A
+        for (int i = 0; i < 32; i++) {
+          assert(A_shared[128 * 40 + i] == A[128 * IC + i]);
+        }
       }
     }
 
