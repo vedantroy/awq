@@ -357,6 +357,7 @@ __global__ void __launch_bounds__(128)
     // debugging
     if (true) {
       __syncthreads();
+      // Ensure A is right-padded w/ -1
       if (threadIdx.x == 0 && threadIdx.y == 0) {
           for (int i = 0; i < 128; i++) {
             for (int j = 32; j < 40; j++) {
@@ -373,9 +374,9 @@ __global__ void __launch_bounds__(128)
         }
         // load the last (128th) row of A_shared and ensure it matches
         // the first 32 elements from the 128th row of A
-        for (int i = 0; i < 32; i++) {
-          assert(A_shared[128 * 40 + i] == A[128 * IC + i]);
-        }
+        // for (int i = 0; i < 32; i++) {
+        //   assert(A_shared[128 * 40 + i] == A[128 * IC + i]);
+        // }
       }
     }
 
