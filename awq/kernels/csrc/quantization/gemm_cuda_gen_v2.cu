@@ -135,7 +135,8 @@ __global__ void __launch_bounds__(128)
   // thd 0 loads elements from 
 
 
-  __shared__ half A_shared[128 * (32 + 8)];
+  #define shared_stride (32 + 8)
+  __shared__ half A_shared[128 * shared_stride];
 
    // for debugging, set everything to -1
    for (int i = 0; i < 128 * (32 + 8); i++) {
@@ -148,7 +149,7 @@ __global__ void __launch_bounds__(128)
     }
    }
 
-  __shared__ half B_shared[64 * (32 + 8)];
+  __shared__ half B_shared[64 * shared_stride];
   
   // __shared__ half scaling_factors_shared[64];
   // __shared__ half zeros_shared[64];
@@ -170,6 +171,8 @@ __global__ void __launch_bounds__(128)
   assert(j_factors1 == divide_round_up_gpu(OC, 64));
   assert(blockIdx_y == blockIdx.x % (divide_round_up_gpu(M, 128) * j_factors1));
   assert(blockIdx_z == blockIdx.x / (divide_round_up_gpu(M, 128) * j_factors1));
+
+  assert(blockIdx_y == blockIdxInGrid);
   assert(blockIdx_z == gridSplitIdx);
 
   
@@ -242,13 +245,13 @@ __global__ void __launch_bounds__(128)
 // Why * 1 in the above line?
                         
   half* A_shared_ptr = A_shared 
-                    + warpIdx * rowsPerWarp * (32 + 8) 
-                    + (threadIdx.x / threadsPerRow) * (32 + 8)
+                    + warpIdx * rowsPerWarp *  shared_stride
+                    + (threadIdx.x / threadsPerRow) * shared_stride
                     + (threadIdx.x % threadsPerRow) * 8;
 
   half* B_shared_ptr = B_shared
-                    + ((int)threadIdx.y) * (row_stride / 4) * (32 + 8)
-                    + (((int)threadIdx.x) / (32 / 8)) * (32 + 8)
+                    + ((int)threadIdx.y) * (row_stride / 4) * shared_stride
+                    + (((int)threadIdx.x) / (32 / 8)) * shared_stride
                     + (((int)threadIdx.x) % (32 / 8)) * 8;
   
 
@@ -367,14 +370,8 @@ __global__ void __launch_bounds__(128)
       }
 
       if (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0 && k_0_0 == 0) {
-        // load the first 32 elements from A_shared and ensure
-        // they match the first 32 elements from A
-        for (int i = 0; i < 32; i++) {
-          assert(A_shared[i] == A[i]);
-        }
-
-        // ensure A_shared is equal to a 128x32 chunk of A
-        // (w/ zero padding)
+        // ensure A_shared is equal to the first 128x32 chunk of A
+        // (w/ zero padding for out of bound rows)
         bool failed = false;
         for (int i = 0; i < M; ++i) {
           for (int j = 0; j < 32; ++j) {
