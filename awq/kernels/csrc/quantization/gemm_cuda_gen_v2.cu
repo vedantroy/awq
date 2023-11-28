@@ -118,6 +118,7 @@ __global__ void __launch_bounds__(128)
   assert(j_factors1 == divide_round_up_gpu(OC, 64));
   assert(blockIdx_y == blockIdx.x % (divide_round_up_gpu(M, 128) * j_factors1));
   assert(blockIdx_z == blockIdx.x / (divide_round_up_gpu(M, 128) * j_factors1));
+  assert(blockIdx_z == gridSplitIdx);
 
   
   // 01 02 03 04 05 06 07 08 (used for 2 mmas)
@@ -168,8 +169,7 @@ __global__ void __launch_bounds__(128)
   int ld_A_row = (gridRowIdxAsMatrixRowIdx + warpIdx * rowsPerWarp + threadIdx.x / threadsPerRow);
   ASSERT_IF(blockIdxInGrid == 0, (0 <= ld_A_row && ld_A_row <= 31));
 
-  #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0 && gridSplitIdx == 0
-  #define FIRST_EVERYTHING (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0)
+  #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0
   FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ld_A_row, == 0);
 
 
@@ -178,6 +178,10 @@ __global__ void __launch_bounds__(128)
                 // TODO: This is an annoying line
                 // NO idea what it means
                 + (threadIdx.x % threadsPerRow) * 8;
+
+  // All threads have an initial offset 
+  // that starts within the first 24 elements
+  assert(((A_ptr - A) % IC) <= ((threadsPerRow - 1) * 8));
   
   int* B_ptr = B
             + ((int)threadIdx.y) * (IC / 8) * 8
@@ -235,17 +239,18 @@ __global__ void __launch_bounds__(128)
               + (((int)threadIdx.x) % 4) * 2;
 
   // preload s.f. and zeros
+
+  // 4096 / 32 = 128 (split input into 128 chunks of 32)
+  // k_bound = 16
+
   int k_bound = make_divisible(IC / 32, split_k_iters); // (IC / 32 + split_k_iters - 1) / split_k_iters;
   if ((k_bound - 1) * 32 + blockIdx_z >= IC) k_bound -= 1;
   
   // TODO (Haotian): load scales and zero points to smem
 
-  if (FIRST_EVERYTHING) {
-    printf("k_bound: %d, g_width_blks: %d\n", k_bound, gridWidthBlocks);
-  }
-
   for (int _k_0_0 = 0; _k_0_0 < k_bound; ++_k_0_0) {
     int k_0_0 = _k_0_0 * split_k_iters + blockIdx_z;
+
     __syncthreads();
     // TODO: Haotian: Here we assume M % cta_M = 0.
     for (int ax0_ax1_fused_0 = 0; ax0_ax1_fused_0 < 4; ++ax0_ax1_fused_0) 
@@ -256,11 +261,27 @@ __global__ void __launch_bounds__(128)
 
       half* base = A;
       half* target = A_ptr + (rowOffset * IC) + (k_0_0 * 32);
+      int offset = target - base;
 
       if (base <= target && target < base + 24) {
-        printf("blk: %d, g_blk: %d, g_row: %d, g_split %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
-          blockIdx.x, blockIdxInGrid, gridRowIdx, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
+        printf("blk: %d, g_blk: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
+          blockIdx.x, blockIdxInGrid, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
+        // TODO: bugs / issues w/ below printf (offset is 0) (hypothesis = > 7 args in printf is bad, but no docs)
+        // https://stackoverflow.com/questions/77550347/cuda-printf-outputs-incorrect-0-if-i-add-one-more-value
+        // https://www.reddit.com/r/CUDA/comments/1841prx/does_cuda_printf_only_support_8_arguments/
+
+        // printf("blk: %d, g_blk: %d, g_row: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
+        //   blockIdx.x, blockIdxInGrid, gridRowIdx, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
+        // printf("offset: %d\n", target - base);
       }
+      // 4096 - 8 = 4088
+      if (offset == 4088) {
+        printf("special, blk: %d, g_blk: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
+          blockIdx.x, blockIdxInGrid, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
+      }
+      // if (blockIdx.x == 0 && warpIdx == 0 && threadIdx.x == 0) {
+      //   printf("blockIdxInGrid: %d, gridSplitIdx %d\n", blockIdxInGrid, gridSplitIdx);
+      // }
 
       // (128 thread * 4 iters * 16 bytes) / 2
       // uint4 = 16 bytes
@@ -306,7 +327,6 @@ __global__ void __launch_bounds__(128)
     // Watch the NVIDIA GTC 2020 talk for details
     // Key point = values are broadcast from one thread to other threads in the warp
     // (8 iters) * (128 bits) * (128 threads) / 16 (bits per fp16) = 8 * 128^2 / 16
-    // = 
     for (int k_0_1 = 0; k_0_1 < 2; ++k_0_1) {
       for (int ax0_0 = 0; ax0_0 < 4; ++ax0_0) {
         {
