@@ -90,11 +90,30 @@ __global__ void __launch_bounds__(128)
   // 01 02 03 04   05 06 07 08   09 10 11 12   13 14 15 16
   // 01 02 03 04   05 06 07 08   09 10 11 12   13 14 15 16
   // 01 02 03 04   05 06 07 08   09 10 11 12   13 14 15 16
-
   float C_warp[64];
 
 
   // TODO: Extra 128 * 8 halfs of storage. Why?
+  // This can hold 640 uint4
+  // Threads load 128 * 4 = 512 uint4
+
+  // warp 0 starts @ 0 * 40
+  //  thd 0..3   =>   seg offset = 0 * 40
+  //    thd 0 => 0, 0+32*40, 0+64*40, 0+96*40
+  //    thd 1 => 8, 8+32*40, 8+64*40, 8+96*40
+  //  thd 4..7   =>   seg offset = 1 * 40
+  //  thd 28..31 =>   seg offset = 7 * 40
+  // warp 1 starts @ 8 * 40
+  //  thd 0..3   =>   seg offset = 0 * 40
+  // warp 3 starts @ 24 * 40
+  //  thd 0..3   =>   seg offset = 0 * 40
+  //  thd 28..31 =>   seg offset = 7 * 40
+  //   thd 28 => 0 + (7 + 24) * 40, 0 + (7 + 24 + 32) * 40, 0 + (7 + 24 + 64) * 40, 0 + (7 + 24 + 96) * 40
+
+  // k split shifts all threads to the right by 8 * 32 elements
+  // but all threads are still within 32 columns of each other
+  // A matrix of size (32 by 4)
+
   __shared__ half A_shared[128 * (32 + 8)];
   __shared__ half B_shared[64 * (32 + 8)];
   
@@ -193,6 +212,7 @@ __global__ void __launch_bounds__(128)
                         
   half* A_shared_ptr = A_shared 
                     + ((int)threadIdx.y) * row_stride_warp * (32 + 8) 
+
                     + (((int)threadIdx.x) / (32 / 8)) * (32 + 8)
                     + (((int)threadIdx.x) % (32 / 8) ) * 8;
 
@@ -241,31 +261,45 @@ __global__ void __launch_bounds__(128)
   // preload s.f. and zeros
 
   // 4096 / 32 = 128 (split input into 128 chunks of 32)
-  // k_bound = 16
+  // k_bound = 16 (chunks per split)
 
+  // chunksPerSplit ??
   int k_bound = make_divisible(IC / 32, split_k_iters); // (IC / 32 + split_k_iters - 1) / split_k_iters;
-  if ((k_bound - 1) * 32 + blockIdx_z >= IC) k_bound -= 1;
+  if ((k_bound - 1) * 32 + gridSplitIdx >= IC) k_bound -= 1;
+
+  // obvious, but include these anyway
+  assert(k_bound * split_k_iters == IC / 32);
+  ASSERT_IF(IC == 4096, k_bound == 16);
   
   // TODO (Haotian): load scales and zero points to smem
 
   for (int _k_0_0 = 0; _k_0_0 < k_bound; ++_k_0_0) {
-    int k_0_0 = _k_0_0 * split_k_iters + blockIdx_z;
+    // chunkIdx ??
+    int k_0_0 = _k_0_0 * split_k_iters + gridSplitIdx;
+    // 0, 8, ... (8 * 15) + 0  = 120
+    // 1, 9, ... (8 * 15) + 1  = 121 
+    // 7, 15, ... (8 * 15) + 7 = 127
+    assert(IC - (k_0_0 * 32) >= 32);
+    // todo, could be more general
+    ASSERT_IF(
+      gridSplitIdx == (split_k_iters - 1) && _k_0_0 == (k_bound - 1), 
+      IC - (k_0_0 * 32) == 32
+    );
 
     __syncthreads();
     // TODO: Haotian: Here we assume M % cta_M = 0.
     for (int ax0_ax1_fused_0 = 0; ax0_ax1_fused_0 < 4; ++ax0_ax1_fused_0) 
     {
       int rowOffset = ax0_ax1_fused_0 * row_stride_A;
-      assert(0 <= rowOffset && rowOffset < 32 * 4 && rowOffset % 32 == 0);
       FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ((ld_A_row + rowOffset) % 32), == 0);
 
       half* base = A;
       half* target = A_ptr + (rowOffset * IC) + (k_0_0 * 32);
       int offset = target - base;
 
-      if (base <= target && target < base + 24) {
-        printf("blk: %d, g_blk: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
-          blockIdx.x, blockIdxInGrid, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
+      // if (base <= target && target < base + 24) {
+        // printf("blk: %d, g_blk: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
+          // blockIdx.x, blockIdxInGrid, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
         // TODO: bugs / issues w/ below printf (offset is 0) (hypothesis = > 7 args in printf is bad, but no docs)
         // https://stackoverflow.com/questions/77550347/cuda-printf-outputs-incorrect-0-if-i-add-one-more-value
         // https://www.reddit.com/r/CUDA/comments/1841prx/does_cuda_printf_only_support_8_arguments/
@@ -273,15 +307,27 @@ __global__ void __launch_bounds__(128)
         // printf("blk: %d, g_blk: %d, g_row: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
         //   blockIdx.x, blockIdxInGrid, gridRowIdx, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
         // printf("offset: %d\n", target - base);
-      }
-      // 4096 - 8 = 4088
-      if (offset == 4088) {
-        printf("special, blk: %d, g_blk: %d, g_split: %d, w_idx: %d, t_idx: %d, k_0_0: %d, offset: %d\n", 
-          blockIdx.x, blockIdxInGrid, gridSplitIdx, warpIdx, threadIdx.x, k_0_0, target - base);
-      }
-      // if (blockIdx.x == 0 && warpIdx == 0 && threadIdx.x == 0) {
-      //   printf("blockIdxInGrid: %d, gridSplitIdx %d\n", blockIdxInGrid, gridSplitIdx);
       // }
+
+      ASSERT_IF(
+          // 4096 - 8 = 4088
+          (offset % IC) == 4088, 
+          k_0_0 == 127 
+          // next line is equivalent to above (last chunk in split + last split)
+          && (gridSplitIdx == split_k_iters - 1 && _k_0_0 == k_bound - 1)
+          // starting offset == 24
+          && (A_ptr - A) % IC == 24
+          // same as above
+          // && (threadIdx.x % threadsPerRow == 3)
+      );
+
+      assert(rowOffset == 0 || rowOffset == 32 || rowOffset == 32 * 2 || rowOffset == 32 * 3);
+
+      half* dest_target = A_shared_ptr + rowOffset * 40
+      int target_off = dest_target - A_shared;
+      ASSERT_IF(warpIdx == 0 && threadIdx.x == 0, target_off == 0 +  rowOffset * 40);
+      ASSERT_IF(warpIdx == 0 && threadIdx.x == 1, target_off == 8 +  rowOffset * 40);
+      ASSERT_IF(warpIdx == 0 && threadIdx.x == 2, target_off == 16 + rowOffset * 40);
 
       // (128 thread * 4 iters * 16 bytes) / 2
       // uint4 = 16 bytes
