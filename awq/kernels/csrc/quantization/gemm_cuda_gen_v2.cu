@@ -113,7 +113,7 @@ __global__ void __launch_bounds__(128)
   // k split shifts all threads to the right by 8 (# of splits) * 32 columns
   // but all threads are still always within 32 columns of each other
 
-  // A matrix of size (128 x 32) (w/ 8 bytes of padding)
+  // A matrix of size (128 x 32) (w/ 8 bytes of padding on the right hand side)
   // for block 0, split 0
   // warp 0:
   // thd 0
@@ -137,10 +137,16 @@ __global__ void __launch_bounds__(128)
 
   __shared__ half A_shared[128 * (32 + 8)];
 
-   // int tid = threadIdx.x + blockIdx.x * blockDim.x;
-   // if (tid < 128 * (32 + 8)) {
-   //     A_shared[tid] = __float2half(0.0);
-   // }
+   // for debugging, set everything to 0
+   for (int i = 0; i < 128 * (32 + 8); i++) {
+     A_shared[i] = __float2half(0.0);
+   }
+   __syncthreads();
+   if (threadIdx.x == 0 && threadIdx.y == 0) {
+    for (int i = 0; i < 128 * (32 + 8); i++) {
+      assert(A_shared[i] == __float2half(0.0));
+    }
+   }
 
   __shared__ half B_shared[64 * (32 + 8)];
   
@@ -239,20 +245,6 @@ __global__ void __launch_bounds__(128)
                     + warpIdx * rowsPerWarp * (32 + 8) 
                     + (threadIdx.x / threadsPerRow) * (32 + 8)
                     + (threadIdx.x % threadsPerRow) * 8;
-
-
-  int row_index_in_shared = threadIdx.y * row_stride_warp;
-  // Calculating the segment within the row, based on the x-coordinate of the thread
-  int segment_within_row = threadIdx.x / (32 / 8);
-  // Calculating the exact element offset within the segment
-  int element_offset_within_segment = threadIdx.x % (32 / 8) * 8;
-
-  // Computing the final pointer position in A_shared
-  half* A_shared_ptr_2 = A_shared 
-                        + row_index_in_shared * (32 + 8) 
-                        + segment_within_row * (32 + 8)
-                        + element_offset_within_segment;
-  assert(A_shared_ptr == A_shared_ptr_2);
 
   half* B_shared_ptr = B_shared
                     + ((int)threadIdx.y) * (row_stride / 4) * (32 + 8)
@@ -360,6 +352,18 @@ __global__ void __launch_bounds__(128)
           (ld_A_row + rowOffset < M) 
           ? *(uint4*)(A_ptr + (rowOffset * IC) + (k_0_0 * 32)) 
           : make_uint4(0, 0, 0, 0);
+    }
+
+    // debugging
+    if (true) {
+      __syncthreads();
+      if (threadIdx.x == 0 && threadIdx.y == 0) {
+          for (int i = 0; i < 128; i++) {
+            for (int j = 32; j < 40; j++) {
+              assert(A_shared[i * 40 + j] == __float2half(0.0));
+            }
+          }
+      }
     }
 
 
