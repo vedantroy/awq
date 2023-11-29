@@ -7,7 +7,7 @@ batch_size = 40
 dim = 4096
 pack_num = 8
 group_size = 128
-base = Path(__file__).parent / 'debug'
+base = Path("/home/vedantroy/Desktop/vllm/llm-awq/examples/debug")
 
 inputs = torch.load(base / 'inputs.pt')
 qweight = torch.load(base / 'qweight.pt')
@@ -21,10 +21,9 @@ assert qzeros.shape == (dim, dim // group_size // pack_num) and qzeros.dtype == 
 
 # add more elemnts to inputs until batch_size is 128
 if batch_size < 128:
-    pass
-    # inputs = torch.cat([inputs] * 4, dim=0)
-    # print(f"inputs.shape={inputs.shape}")
-    # assert inputs.shape[0] == 160
+    inputs = torch.cat([inputs] * 4, dim=0)
+    print(f"inputs.shape={inputs.shape}")
+    assert inputs.shape[0] == 160
 
 # From the CUDA kernel
 #  in_feats: M, IC [float16]
@@ -53,3 +52,4 @@ assert out.shape == (inputs.shape[0], dim) and out.dtype == torch.float16
 
 # torch.testing.assert_close(out, out2, rtol=1e-3, atol=1e-3)
 torch.testing.assert_close(out, out2)
+

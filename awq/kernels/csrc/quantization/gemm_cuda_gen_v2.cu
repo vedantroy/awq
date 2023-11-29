@@ -235,16 +235,12 @@ __global__ void __launch_bounds__(128)
   assert(((A_ptr - A) % IC) <= ((threadsPerRow - 1) * 8));
   
   int* B_ptr = B
-              + (
-                blockIdxInGrid * 64
-                + warpIdx * rowsPerWarp
-                + threadIdx.x / threadsPerRow
-              ) * (IC / 8)
-             + (threadIdx.x % threadsPerRow);
-
-  if (B_ptr - B == 0) {
-    printf("blockIdx: %d", blockIdx.x);
-  }
+            + (
+              (blockIdxInGrid % gridWidthBlocks) * 64
+              + warpIdx * rowsPerWarp
+              + threadIdx.x / threadsPerRow
+            ) * (IC / 8)
+           + (threadIdx.x % threadsPerRow);
   
 // Why * 1 in the above line?
 
