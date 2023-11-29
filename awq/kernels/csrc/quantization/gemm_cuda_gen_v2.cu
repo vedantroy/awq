@@ -93,23 +93,6 @@ __global__ void __launch_bounds__(128)
   float C_warp[64];
 
 
-  // TODO: Extra 128 * 8 halfs of storage. Why?
-  // This can hold 640 uint4
-  // Threads load 128 * 4 = 512 uint4
-
-  // warp 0 starts @ 0 * 40
-  //  thd 0..3   =>   seg offset = 0 * 40
-  //    thd 0 => 0, 0+32*40, 0+64*40, 0+96*40
-  //    thd 1 => 8, 8+32*40, 8+64*40, 8+96*40
-  //  thd 4..7   =>   seg offset = 1 * 40
-  //  thd 28..31 =>   seg offset = 7 * 40
-  // warp 1 starts @ 8 * 40
-  //  thd 0..3   =>   seg offset = 0 * 40
-  // warp 3 starts @ 24 * 40
-  //  thd 0..3   =>   seg offset = 0 * 40
-  //  thd 28..31 =>   seg offset = 7 * 40
-  //  thd 28 => 0 + (7 + 24) * 40, 0 + (7 + 24 + 32) * 40, 0 + (7 + 24 + 64) * 40, 0 + (7 + 24 + 96) * 40
-
   // k split shifts all threads to the right by 8 (# of splits) * 32 columns
   // but all threads are still always within 32 columns of each other
 
@@ -132,8 +115,6 @@ __global__ void __launch_bounds__(128)
   //     (24..56..32*3+24=120, 0) ->  (24..56..120, 0)
   // thd 31
   //     (31..63..32*3+31=127, 24) -> (31..63..127, 24)
-  // thd 0 loads elements from 
-
 
   #define shared_stride (32 + 8)
   __shared__ half A_shared[128 * shared_stride];
@@ -153,12 +134,14 @@ __global__ void __launch_bounds__(128)
   // A matrix of size (64 x 32) (w/ 8 bytes of padding on the right hand side)
   // for block 0, split 0
   // warp 0:
-  //   thd 0: -> (0..32, 0)
+  //   thd 0: (0..32,0) -> (0..32, 0)
   //   thd 1: -> (0..32, 8)
   //   thd 4: -> (1..33, 0)
   // warp 3:
   //   thd 0: ->  (24..56, 0)
   //   thd 31: -> (24+7=31..56+7=63, 24)
+
+  // block 1, split 0
 
   __shared__ half B_shared[64 * shared_stride];
   
@@ -239,7 +222,7 @@ __global__ void __launch_bounds__(128)
   );
   ASSERT_IF(blockIdxInGrid == 0, (0 <= ld_A_row && ld_A_row <= 31));
 
-  #define FIRST_BLOCK_FIRST_WARP blockIdxInGrid == 0 && warpIdx == 0
+  #define FIRST_BLOCK_FIRST_WARP (blockIdxInGrid == 0 && warpIdx == 0)
   FANCY_ASSERT_IF(FIRST_BLOCK_FIRST_WARP && (threadIdx.x == 0 || threadIdx.x == 1), ld_A_row, == 0);
 
 
@@ -420,21 +403,24 @@ __global__ void __launch_bounds__(128)
       // each warp: 32 x 4
       // each thr: read 32 bit -> convert to 8xFP16 (a UINT4) -> scale and minus zero -> WB UINT4
       // row stride in shared memory: (NWARPS * 32 * 8 / cta_N) 
-      int B_loaded_current = *(B_ptr_local + ax0_ax1_fused_0 * row_stride * (IC / 8));
-      int zeros_loaded = *(zeros_ptr_local + ax0_ax1_fused_0 * row_stride * zeros_w);
+      int rowOff = ax0_ax1_fused_0 * row_stride;
+      int B_loaded_current = *(B_ptr_local + rowOff * (IC / 8));
+      int zeros_loaded = *(zeros_ptr_local + rowOff * zeros_w);
       zeros_loaded >>= ((k_0_0 * 32 / G) % 8) * 4;
+      // & 0xF extracts the rightmost 4 bits
       float current_zeros = (float)(zeros_loaded & 0xF);
-      half scaling_factors_loaded = *(scaling_factors_ptr_local + ax0_ax1_fused_0 * row_stride * sf_w);
+      half scaling_factors_loaded = *(scaling_factors_ptr_local + rowOff * sf_w);
       half B_loaded_fp16[8];
       #pragma unroll
       for (int ic_1 = 0; ic_1 < 8; ic_1++){
         float current_single_weight_fp = (float)(B_loaded_current & 0xF);
         half dequantized_weight = __float2half(__half2float(scaling_factors_loaded) * (current_single_weight_fp - current_zeros));
+        // bitwise right shift by 4 bits
         B_loaded_current = B_loaded_current >> 4;
         B_loaded_fp16[ic_1] = dequantized_weight;  
       }
       // write back
-      *(uint4*)(B_shared_ptr + ax0_ax1_fused_0 * row_stride * shared_stride) = *reinterpret_cast<uint4*>(B_loaded_fp16);
+      *(uint4*)(B_shared_ptr + rowOff * shared_stride) = *reinterpret_cast<uint4*>(B_loaded_fp16);
     }
     __syncthreads();
     // Load values from shared memory (A_shared) to registers (A_shared_warp)
@@ -483,62 +469,60 @@ __global__ void __launch_bounds__(128)
         }
       }
           
-          for (int warpRow = 0; warpRow < 4; ++warpRow) {
-            // Each loop iteration loads 4 unsigned (8 halfs)
-            // `warpRow * 8` advances the pointer by 8 halfs
-            unsigned* aSharedPtr = (unsigned *)(A_shared_warp + (warpRow * 8));
-            for (int warpCol = 0; warpCol < 2; ++warpCol) {
-          
-                int cWarpBaseIndex = (warpRow * 16) + (warpCol * 8);
-                unsigned* bSharedPtr = (unsigned *)(B_shared_warp + (warpCol * 8));
-                float* cWarpPtr1 = (float *)(C_warp + cWarpBaseIndex);
+      for (int warpRow = 0; warpRow < 4; ++warpRow) {
+        // Each loop iteration loads 4 unsigned (8 halfs)
+        // `warpRow * 8` advances the pointer by 8 halfs
+        unsigned* aSharedPtr = (unsigned *)(A_shared_warp + (warpRow * 8));
+        for (int warpCol = 0; warpCol < 2; ++warpCol) {
+      
+            int cWarpBaseIndex = (warpRow * 16) + (warpCol * 8);
+            unsigned* bSharedPtr = (unsigned *)(B_shared_warp + (warpCol * 8));
+            float* cWarpPtr1 = (float *)(C_warp + cWarpBaseIndex);
 
-                // https://www.reddit.com/r/CUDA/comments/qk9rbs/i_dont_understand_how_cuda_kernel_works_within/
-                // tensor core instructions operate on an entire warp
+            // https://www.reddit.com/r/CUDA/comments/qk9rbs/i_dont_understand_how_cuda_kernel_works_within/
+            // tensor core instructions operate on an entire warp
 
-                // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions
-                // The matrix multiply and accumulate operation has the following form:
-                // D = A * B + C
-                // where D and C are called accumulators and may refer to the same matrix
-                // A = MxK, B=KxN, C,D=MxN
+            // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions
+            // The matrix multiply and accumulate operation has the following form:
+            // D = A * B + C
+            // where D and C are called accumulators and may refer to the same matrix
+            // A = MxK, B=KxN, C,D=MxN
 
-                // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-shape
-                // mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32
-                // - .m16n8k16 specifies M,N,K
-                // - 1st matrix = row, 2nd = col
-                // - D=f32, A=f16, B=f16, C=f32
-                //     this matches up w/ A_shared_warp, B_shared_warp being `half` and C_warp being float
+            // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-shape
+            // mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32
+            // - .m16n8k16 specifies M,N,K
+            // - 1st matrix = row, 2nd = col
+            // - D=f32, A=f16, B=f16, C=f32
+            //     this matches up w/ A_shared_warp, B_shared_warp being `half` and C_warp being float
 
-                // Slides
-                // https://developer.download.nvidia.com/video/gputechconf/gtc/2020/presentations/s21745-developing-cuda-kernels-to-push-tensor-cores-to-the-absolute-limit-on-nvidia-a100.pdf
+            // Slides
+            // https://developer.download.nvidia.com/video/gputechconf/gtc/2020/presentations/s21745-developing-cuda-kernels-to-push-tensor-cores-to-the-absolute-limit-on-nvidia-a100.pdf
 
 
-                // https://developer.download.nvidia.com/compute/DevZone/docs/html/C/doc/Using_Inline_PTX_Assembly_In_CUDA.pdf
-                // registers: f = .f32, r = .u32 (I guess 2 floats are packed into a 32 bit int?)
-                __asm__ __volatile__(
-                    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
-                    "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n"
-                    : "=f"(cWarpPtr1[0]), "=f"(cWarpPtr1[1]), "=f"(cWarpPtr1[2]), "=f"(cWarpPtr1[3])
-                    : "r"(aSharedPtr[0]), "r"(aSharedPtr[1]), "r"(aSharedPtr[2]), "r"(aSharedPtr[3]), 
-                      "r"(bSharedPtr[0]), "r"(bSharedPtr[1]), 
-                      "f"(cWarpPtr1[0]), "f"(cWarpPtr1[1]), "f"(cWarpPtr1[2]), "f"(cWarpPtr1[3])
-                );
+            // https://developer.download.nvidia.com/compute/DevZone/docs/html/C/doc/Using_Inline_PTX_Assembly_In_CUDA.pdf
+            // registers: f = .f32, r = .u32 (I guess 2 floats are packed into a 32 bit int?)
+            __asm__ __volatile__(
+                "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
+                "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n"
+                : "=f"(cWarpPtr1[0]), "=f"(cWarpPtr1[1]), "=f"(cWarpPtr1[2]), "=f"(cWarpPtr1[3])
+                : "r"(aSharedPtr[0]), "r"(aSharedPtr[1]), "r"(aSharedPtr[2]), "r"(aSharedPtr[3]), 
+                  "r"(bSharedPtr[0]), "r"(bSharedPtr[1]), 
+                  "f"(cWarpPtr1[0]), "f"(cWarpPtr1[1]), "f"(cWarpPtr1[2]), "f"(cWarpPtr1[3])
+            );
 
-                unsigned* bSharedPtrOffset = bSharedPtr + 2;
-                float* cWarpPtr2 = cWarpPtr1 + 4;
+            unsigned* bSharedPtrOffset = bSharedPtr + 2;
+            float* cWarpPtr2 = cWarpPtr1 + 4;
 
-                __asm__ __volatile__(
-                    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
-                    "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n"
-                    : "=f"(cWarpPtr2[0]), "=f"(cWarpPtr2[1]), "=f"(cWarpPtr2[2]), "=f"(cWarpPtr2[3])
-                    : "r"(aSharedPtr[0]), "r"(aSharedPtr[1]), "r"(aSharedPtr[2]), "r"(aSharedPtr[3]), 
-                      "r"(bSharedPtrOffset[0]), "r"(bSharedPtrOffset[1]), 
-                      "f"(cWarpPtr2[0]), "f"(cWarpPtr2[1]), "f"(cWarpPtr2[2]), "f"(cWarpPtr2[3])
-                );
-            }
+            __asm__ __volatile__(
+                "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
+                "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n"
+                : "=f"(cWarpPtr2[0]), "=f"(cWarpPtr2[1]), "=f"(cWarpPtr2[2]), "=f"(cWarpPtr2[3])
+                : "r"(aSharedPtr[0]), "r"(aSharedPtr[1]), "r"(aSharedPtr[2]), "r"(aSharedPtr[3]), 
+                  "r"(bSharedPtrOffset[0]), "r"(bSharedPtrOffset[1]), 
+                  "f"(cWarpPtr2[0]), "f"(cWarpPtr2[1]), "f"(cWarpPtr2[2]), "f"(cWarpPtr2[3])
+            );
+        }
       }
-
-
     }
   }
     
