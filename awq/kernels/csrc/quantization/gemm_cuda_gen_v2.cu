@@ -454,55 +454,17 @@ __global__ void __launch_bounds__(128)
     for (int k_0_1 = 0; k_0_1 < 2; ++k_0_1) {
       for (int ax0_0 = 0; ax0_0 < 4; ++ax0_0) {
         {
-          /*
-          // Constants for understanding the structure of A_shared
-          const int elementsPerRow = 40;
-          const int rowsPerHalf = 64;
-          const int rowsPerQuarter = rowsPerHalf / 2;
-          const int rowsPerEighth = rowsPerQuarter / 2;
-          const int segmentsPerRow = 16;
-          const int elementsPerSegment = 40;
-          const int subSegmentsPerSegment = 2;
-          const int elementsPerSubSegment = 8;
-          
-          // Calculate the row offset
-          int halfIndex = threadIdx.y & 1;
-          int quarterIndex = ax0_0;
-          int eighthIndex = k_0_1;
-          int rowOffset = (halfIndex * rowsPerHalf + quarterIndex * rowsPerQuarter + eighthIndex * rowsPerEighth) * elementsPerRow;
-          
-          // Calculate the column offset
-          int segmentIndex = threadIdx.x & (segmentsPerRow - 1);
-          int subSegmentIndex = threadIdx.x >> 4;
-          int columnOffset = segmentIndex * elementsPerSegment + subSegmentIndex * elementsPerSubSegment;
-          
-          // Calculate the total offset
-          int offset = rowOffset + columnOffset;
-          
-          // Access the element at the calculated offset
-          half* element = &(A_shared[offset]);
-
-
-          unsigned int addr;
-          __asm__ __volatile__(
-            "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
-            : "=r"(addr)
-            : "l"((void *)element)
-          );
-          */
-
           unsigned int addr;
           __asm__ __volatile__(
            "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
            : "=r"(addr)
-           : "l"(void *)(
+           : "l"((void *)(
             A_shared 
             + ((warpIdx & 1) * A_elems / 2)
             + (ax0_0 * A_elems / 8)
             + (k_0_1 * 16)
             + ((threadIdx.x % 16) * shared_stride) + ((threadIdx.x / 16) * 8)
-         ));
-
+         )));
 
           unsigned* aOff = (unsigned *)(A_shared_warp + (ax0_0 * 8));
           __asm__ __volatile__(
@@ -522,10 +484,12 @@ __global__ void __launch_bounds__(128)
             : "=r"(addr)
             : "l"((void *)((&(B_shared[((((((int)threadIdx.y) >> 1) * 1280) + (ax0_0_1 * 640)) + (k_0_1 * 16))])) + ((((((int)threadIdx.x) >> 4) * 320) + ((((int)threadIdx.x) & 7) * 40)) + (((((int)threadIdx.x) & 15) >> 3) * 8))))
           );
+
+          unsigned* bOff = (unsigned *)(B_shared_warp + (ax0_0_1 * 8));
           __asm__ __volatile__(
             "ldmatrix.sync.aligned.m8n8.x4.shared.b16"
             "{%0, %1, %2, %3}, [%4];\n"
-            : "=r"(((unsigned *)(B_shared_warp + (ax0_0_1 * 8)))[0]), "=r"(((unsigned *)(B_shared_warp + (ax0_0_1 * 8)))[1]), "=r"(((unsigned *)(B_shared_warp + (ax0_0_1 * 8)))[2]), "=r"(((unsigned *)(B_shared_warp + (ax0_0_1 * 8)))[3])
+            : "=r"(bOff[0]), "=r"(bOff[1]), "=r"(bOff[2]), "=r"(bOff[3])
             : "r"(addr)
           );
         }
