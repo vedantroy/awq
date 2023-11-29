@@ -461,7 +461,7 @@ __global__ void __launch_bounds__(128)
            : "=r"(addr)
            : "l"((void *)(
             A_shared 
-            + ((warpIdx & 1) * A_elems / 2)
+            + ((warpIdx % 2) * A_elems / 2)
             + (ax0_0 * A_elems / 8)
             + (k_0_1 * 16)
             + ((threadIdx.x % 16) * shared_stride) + ((threadIdx.x / 16) * 8)
@@ -484,15 +484,13 @@ __global__ void __launch_bounds__(128)
             "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
             : "=r"(addr)
             : "l"((void *)(
-              // (&(B_shared[((((((int)threadIdx.y) >> 1) * 1280) + (ax0_0_1 * 640)) + (k_0_1 * 16))])) 
-              // + ((((((int)threadIdx.x) >> 4) * 320) + ((((int)threadIdx.x) & 7) * 40)) + (((((int)threadIdx.x) & 15) >> 3) * 8))))
               B_shared
-              + (threadIdx.y >> 1) * 1280
-              + (ax0_0_1 * 640)
-              + (k_0_1 * 16)
-              + ((threadIdx.x >> 4) * 320)
-              + ((threadIdx.x & 7) * 40)
-              + (((threadIdx.x & 15) >> 3) * 8)
+              + threadIdx.y / 2 * 1280
+              + ax0_0_1 * 640
+              + k_0_1 * 16
+              + threadIdx.x / 16 * 320
+              + (threadIdx.x % 8) * 40
+              + (threadIdx.x % 16 / 8) * 8
           )));
 
           unsigned* bOff = (unsigned *)(B_shared_warp + (ax0_0_1 * 8));
