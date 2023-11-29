@@ -141,7 +141,8 @@ __global__ void __launch_bounds__(128)
   //   thd 31: -> (24+7=31..56+7=63, 24)
 
   // block 1, split 0
-
+  #define B_rows 64
+  #define B_elems (B_rows * shared_stride)
   __shared__ half B_shared[64 * shared_stride];
 
   if (threadIdx.x == 0 && threadIdx.y == 0) {
@@ -482,8 +483,17 @@ __global__ void __launch_bounds__(128)
           __asm__ __volatile__(
             "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
             : "=r"(addr)
-            : "l"((void *)((&(B_shared[((((((int)threadIdx.y) >> 1) * 1280) + (ax0_0_1 * 640)) + (k_0_1 * 16))])) + ((((((int)threadIdx.x) >> 4) * 320) + ((((int)threadIdx.x) & 7) * 40)) + (((((int)threadIdx.x) & 15) >> 3) * 8))))
-          );
+            : "l"((void *)(
+              // (&(B_shared[((((((int)threadIdx.y) >> 1) * 1280) + (ax0_0_1 * 640)) + (k_0_1 * 16))])) 
+              // + ((((((int)threadIdx.x) >> 4) * 320) + ((((int)threadIdx.x) & 7) * 40)) + (((((int)threadIdx.x) & 15) >> 3) * 8))))
+              B_shared
+              + (threadIdx.y >> 1) * 1280
+              + (ax0_0_1 * 640)
+              + (k_0_1 * 16)
+              + ((threadIdx.x >> 4) * 320)
+              + ((threadIdx.x & 7) * 40)
+              + (((threadIdx.x & 15) >> 3) * 8)
+          )));
 
           unsigned* bOff = (unsigned *)(B_shared_warp + (ax0_0_1 * 8));
           __asm__ __volatile__(
