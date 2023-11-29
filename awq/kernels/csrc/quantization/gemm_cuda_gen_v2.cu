@@ -143,7 +143,7 @@ __global__ void __launch_bounds__(128)
   // block 1, split 0
   #define B_rows 64
   #define B_elems (B_rows * shared_stride)
-  __shared__ half B_shared[64 * shared_stride];
+  __shared__ half B_shared[B_rows * shared_stride];
 
   if (threadIdx.x == 0 && threadIdx.y == 0) {
     for (int i = 0; i < 64 * shared_stride; i++) {
@@ -520,11 +520,16 @@ __global__ void __launch_bounds__(128)
             && (warpIdx == 0 || warpIdx == 2) 
             && k_0_1 == 0) {
           #define eq(i,j) (A_shared_warp[i] == A_shared[j])
+          // ax0_0 = 0
           assert(
             // left cell
             eq(0, 0) && eq(1, 1)
             && eq(2, 8 * shared_stride) && eq(3, (8 * shared_stride) + 1)
+          );
+          assert(
             // right cell
+            eq(4, 8) && eq(5, 8 + 1)
+            && eq(6, (8 * shared_stride) + 8) && eq(7, (8 * shared_stride) + 8 + 1)
           );
           #undef eq
         }
@@ -540,9 +545,9 @@ __global__ void __launch_bounds__(128)
               B_shared
               + (threadIdx.y / 2) * 1280
               + ax0_0_1 * 640
-              + k_0_1 * 16
               + (threadIdx.x / 16) * 320
               + (threadIdx.x % 8) * 40
+              + k_0_1 * 16
               + ((threadIdx.x % 16) / 8) * 8
           )));
 
