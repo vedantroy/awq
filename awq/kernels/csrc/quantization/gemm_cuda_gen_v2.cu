@@ -200,6 +200,7 @@ __global__ void __launch_bounds__(128)
 
   int matrixRowsPerGridRow = 128;
   int gridRowIdx = blockIdxInGrid / gridWidthBlocks;
+  // this might be an unnecessary var
   // 0, 128, 256, etc.
   int gridRowIdxAsMatrixRowIdx = gridRowIdx * matrixRowsPerGridRow;
   assert(gridRowIdxAsMatrixRowIdx % 128 == 0);
@@ -252,11 +253,13 @@ __global__ void __launch_bounds__(128)
   
 
   int* zeros_ptr = zeros
-                + ((int)threadIdx.y) * zeros_w * 8
-                + (((int)threadIdx.x) / (32 / 8)) * zeros_w
-                + (((int)blockIdx_y) % j_factors1) * 64 * zeros_w
+                + (
+                  (blockIdxInGrid % gridWidthBlocks) * 64
+                  + warpIdx * rowsPerWarp
+                  + threadIdx.x / threadsPerRow
+                ) * zeros_w;
                 // this term is zero
-                + (((int)threadIdx.x) % (32 / 8)) / G ;
+                // + (((int)threadIdx.x) % (32 / 8)) / G ;
   
   half* scaling_factors_ptr = scaling_factors
                             + ((int)threadIdx.y) * sf_w * 8
@@ -365,7 +368,6 @@ __global__ void __launch_bounds__(128)
           }
       }
 
-      // if (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0 && k_0_0 == 0) {
       // all blocks in the first grid row + first split, load the same elements
       // here, we're specifically looking @ the first chunk of the first split
       if (gridRowIdx == 0 && warpIdx == 0 && threadIdx.x == 0 && k_0_0 == 0) {
