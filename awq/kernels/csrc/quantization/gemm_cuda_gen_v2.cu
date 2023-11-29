@@ -241,6 +241,10 @@ __global__ void __launch_bounds__(128)
                 + threadIdx.x / threadsPerRow
               ) * (IC / 8)
              + (threadIdx.x % threadsPerRow);
+
+  if (B_ptr - B == 0) {
+    printf("blockIdx: %d", blockIdx.x);
+  }
   
 // Why * 1 in the above line?
 
@@ -372,10 +376,10 @@ __global__ void __launch_bounds__(128)
         // ensure A_shared is equal to the first 128x32 chunk of A
         // (w/ zero padding for out of bound rows)
         bool failed = false;
-        for (int i = 0; i < M; ++i) {
+        for (int i = 0; i < min(M, 128); ++i) {
           for (int j = 0; j < 32; ++j) {
             if (A_shared[i * 40 + j] !=  A[i * IC + j]) {
-              printf("i: %d, j: %d, A_shared: %f, A: %f\n", i, j, __half2float(A_shared[i * 40 + j]), __half2float(A[i * IC + j]));
+              // printf("i: %d, j: %d, A_shared: %f, A: %f\n", i, j, __half2float(A_shared[i * 40 + j]), __half2float(A[i * IC + j]));
               failed = true;
             }
           }
@@ -384,7 +388,7 @@ __global__ void __launch_bounds__(128)
         for (int i = M; i < 128; ++i) {
           for (int j = 0; j < 32; ++j) {
             if (A_shared[i * 40 + j] != __float2half(0)) {
-              printf("i: %d, j: %d, A_shared: %f\n", i, j, __half2float(A_shared[i * 40 + j]));
+              // printf("i: %d, j: %d, A_shared: %f\n", i, j, __half2float(A_shared[i * 40 + j]));
               failed = true;
             }
           }

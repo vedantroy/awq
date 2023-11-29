@@ -20,10 +20,11 @@ assert scales.shape == (dim, dim // group_size) and scales.dtype == torch.float1
 assert qzeros.shape == (dim, dim // group_size // pack_num) and qzeros.dtype == torch.int32
 
 # add more elemnts to inputs until batch_size is 128
-# if batch_size < 128:
-#     inputs = torch.cat([inputs] * (128 // batch_size), dim=0)
-#     print(f"inputs.shape={inputs.shape}")
-#     assert inputs.shape[0] == 120
+if batch_size < 128:
+    pass
+    # inputs = torch.cat([inputs] * 4, dim=0)
+    # print(f"inputs.shape={inputs.shape}")
+    # assert inputs.shape[0] == 160
 
 # From the CUDA kernel
 #  in_feats: M, IC [float16]
@@ -48,7 +49,7 @@ print_dsc(qzeros)
 
 out = ie.gemm_forward_cuda(inputs, qweight, scales, qzeros, group_size, 8)
 out2 = ie.gemm_forward_cuda2(inputs, qweight, scales, qzeros, group_size, 8)
-assert out.shape == (batch_size, dim) and out.dtype == torch.float16
+assert out.shape == (inputs.shape[0], dim) and out.dtype == torch.float16
 
 # torch.testing.assert_close(out, out2, rtol=1e-3, atol=1e-3)
 torch.testing.assert_close(out, out2)
