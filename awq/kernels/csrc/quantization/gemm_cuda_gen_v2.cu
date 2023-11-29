@@ -450,12 +450,16 @@ __global__ void __launch_bounds__(128)
     // Load values from shared memory (A_shared) to registers (A_shared_warp)
     // 8 loop iterations corresponds to 8 mma instructions
     // Watch the NVIDIA GTC 2020 talk for details
+
+    // k_0_1 loop
     for (int k_0_1 = 0; k_0_1 < 2; ++k_0_1) {
 
 
       // Broadcast A_shared to A_shared_warp
       // 128 threads * (8 halfs * 4 iters/thread) -> 128 threads * 32 (size of A_shared_warp)
-      // Key point = values are broadcast from one thread to other threads in the warp
+      // Key point: values are broadcast from one thread to other threads in the warp
+      // Note: Each iteration of k_0_1 loop loads the entire A_shared matrix
+      // (which makes me wonder what k_0_1 is doing)
       for (int ax0_0 = 0; ax0_0 < 4; ++ax0_0) {
         // Hypothesis:
         // Chunks of 8 are loaded from A_shared
@@ -463,6 +467,11 @@ __global__ void __launch_bounds__(128)
         {
           unsigned int addr;
           __asm__ __volatile__(
+          // https://forums.developer.nvidia.com/t/why-do-i-need-to-convert-a-pointer-to-shared-address-space-before-using-the-ldmatrix-instruction/274466
+          // In PTX, left-hand is output, right-hand is input (like assignment)
+          // - declare register (addr)
+          // - convert 64-bit input to shared address space
+          // - convert shared address to 32-bit output
            "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
            : "=r"(addr)
            // l = .u64
@@ -472,7 +481,7 @@ __global__ void __launch_bounds__(128)
             // first half -> warps 0, 2; second half -> warps 1, 3
             + ((warpIdx % 2) * A_elems / 2)
             // Each 4 iterations of ax0_0 works on 1/4th of the 1/2
-            + (ax0_0 * A_elems / 8)
+            + (ax0_0 * (A_elems / 2) / 4)
             + ((threadIdx.x % 16) * shared_stride) 
 
             // Column offset calculations
@@ -490,6 +499,16 @@ __global__ void __launch_bounds__(128)
 
           unsigned* aOff = (unsigned *)(A_shared_warp + (ax0_0 * 8));
           __asm__ __volatile__(
+            // https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-load-instruction-ldmatrix
+            //  Docs:
+            //  .sync -> all thds in warp wait for each other to execute the same instruction
+            //  .aligned -> all thds in warp execute the same ldmatrix instruction
+            //  .m8n8 -> matrix size
+            //  .x4 -> 4 matrixes
+            //  .b16 -> matrix holds 16-bit data
+
+            // Math checks out:
+            // (4 warps) * (4 iters) * (4 # of matrixes) * (8 * 8 matrix) = 64 * 64 = 
             "ldmatrix.sync.aligned.m8n8.x4.shared.b16"
             "{%0, %1, %2, %3}, [%4];\n"
             // r = .u32 (2 half)
