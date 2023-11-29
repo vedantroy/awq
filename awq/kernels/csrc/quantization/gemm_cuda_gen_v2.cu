@@ -491,10 +491,6 @@ __global__ void __launch_bounds__(128)
             // - 1st 1/2 warp -> 0
             // - 2nd 1/2 warp -> 8
             + ((threadIdx.x / 16) * 8)
-
-            // fix ax0_0 = 0, k_0_1 = 0,1
-            // thd 0 -> (0, 0), (0, 16) 
-            // thd 1 -> (1, 0), (1, 16)
          )));
 
           unsigned* aOff = (unsigned *)(A_shared_warp + (ax0_0 * 8));
