@@ -485,12 +485,12 @@ __global__ void __launch_bounds__(128)
             : "=r"(addr)
             : "l"((void *)(
               B_shared
-              + threadIdx.y / 2 * 1280
+              + (threadIdx.y / 2) * 1280
               + ax0_0_1 * 640
               + k_0_1 * 16
-              + threadIdx.x / 16 * 320
+              + (threadIdx.x / 16) * 320
               + (threadIdx.x % 8) * 40
-              + (threadIdx.x % 16 / 8) * 8
+              + ((threadIdx.x % 16) / 8) * 8
           )));
 
           unsigned* bOff = (unsigned *)(B_shared_warp + (ax0_0_1 * 8));
