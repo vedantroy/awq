@@ -461,7 +461,9 @@ __global__ void __launch_bounds__(128)
            : "=r"(addr)
            : "l"((void *)(
             A_shared 
+            // first half -> warps 0, 2; second half -> warps 1, 3
             + ((warpIdx % 2) * A_elems / 2)
+            // Each 4 iterations of ax0_0 works on 1/4th of the 1/2
             + (ax0_0 * A_elems / 8)
             + (k_0_1 * 16)
             + ((threadIdx.x % 16) * shared_stride) + ((threadIdx.x / 16) * 8)
