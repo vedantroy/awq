@@ -495,15 +495,13 @@ __global__ void __launch_bounds__(128)
           __asm__ __volatile__(
            "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
            : "=r"(addr)
-           : "l"((void *)(
-            //  (&(A_shared[((((((int)threadIdx.y) & 1) * 2560) + (ax0_0 * 640)) + (k_0_1 * 16))])) + 
-             (&(A_shared[
-              ((warpIdx & 1) * A_elems / 2)
-              + (ax0_0 * A_elems / 8)
-              + (k_0_1 * 16)
-              ])) + 
-             (((((int)threadIdx.x) & 15) * 40) + ((((int)threadIdx.x) >> 4) * 8))))
-         );
+           : "l"(void *)(
+            A_shared 
+            + ((warpIdx & 1) * A_elems / 2)
+            + (ax0_0 * A_elems / 8)
+            + (k_0_1 * 16)
+            + ((threadIdx.x % 16) * shared_stride) + ((threadIdx.x / 16) * 8)
+         ));
 
 
           unsigned* aOff = (unsigned *)(A_shared_warp + (ax0_0 * 8));
