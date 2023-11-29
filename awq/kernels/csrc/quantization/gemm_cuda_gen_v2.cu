@@ -365,7 +365,10 @@ __global__ void __launch_bounds__(128)
           }
       }
 
-      if (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0 && k_0_0 == 0) {
+      // if (FIRST_BLOCK_FIRST_WARP && threadIdx.x == 0 && k_0_0 == 0) {
+      // all blocks in the first grid row + first split, load the same elements
+      // here, we're specifically looking @ the first chunk of the first split
+      if (gridRowIdx == 0 && warpIdx == 0 && threadIdx.x == 0 && k_0_0 == 0) {
         // ensure A_shared is equal to the first 128x32 chunk of A
         // (w/ zero padding for out of bound rows)
         bool failed = false;
