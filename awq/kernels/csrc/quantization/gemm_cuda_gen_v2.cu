@@ -576,7 +576,7 @@ __global__ void __launch_bounds__(128)
 }
 
 // in_feats: M, IC [float16]
-// kernel: IC, OC // 8 [int32] -> cast to IC, OC [uint4b]
+// kernel: OC, IC // 8 [int32] -> cast to OC, IC [uint4b]
 // scaling_factors: IC // G, OC [float16]
 // zeros: IC // G, OC // 8 [int32] -> cast to IC // G, OC [uint4b]
 // assume that batch_size < 16 for now
