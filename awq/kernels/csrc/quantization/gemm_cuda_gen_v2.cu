@@ -118,11 +118,12 @@ __global__ void __launch_bounds__(128)
 
   #define A_rows 128
   #define shared_stride (32 + 8)
-  __shared__ half A_shared[A_rows * shared_stride];
+  #define A_elems (A_rows * shared_stride)
+  __shared__ half A_shared[A_elems];
 
    // for debugging, set everything to -1
    if (threadIdx.x == 0 && threadIdx.y == 0) {
-     for (int i = 0; i < A_rows * shared_stride; i++) {
+     for (int i = 0; i < A_elems; i++) {
        A_shared[i] = __float2half(-1.0);
      }
    }
@@ -495,9 +496,12 @@ __global__ void __launch_bounds__(128)
            "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
            : "=r"(addr)
            : "l"((void *)(
-             (&(A_shared[((
-              ((((int)threadIdx.y) & 1) * 2560) 
-              + (ax0_0 * 640)) + (k_0_1 * 16))])) + 
+            //  (&(A_shared[((((((int)threadIdx.y) & 1) * 2560) + (ax0_0 * 640)) + (k_0_1 * 16))])) + 
+             (&(A_shared[
+              ((warpIdx & 1) * A_elems / 2)
+              + (ax0_0 * A_elems / 8)
+              + (k_0_1 * 16)
+              ])) + 
              (((((int)threadIdx.x) & 15) * 40) + ((((int)threadIdx.x) >> 4) * 8))))
          );
 
