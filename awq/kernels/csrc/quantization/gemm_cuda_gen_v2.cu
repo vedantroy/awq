@@ -513,6 +513,22 @@ __global__ void __launch_bounds__(128)
           );
         }
       }
+
+      if (true) {
+        __syncthreads();
+        if (threadIdx.x == 0 
+            && (warpIdx == 0 || warpIdx == 2) 
+            && k_0_1 == 0) {
+          #define eq(i,j) (A_shared_warp[i] == A_shared[j])
+          assert(
+            // left cell
+            eq(0, 0) && eq(1, 1)
+            && eq(2, 8 * shared_stride) && eq(3, (8 * shared_stride) + 1)
+            // right cell
+          );
+          #undef eq
+        }
+      }
       
       for (int ax0_0_1 = 0; ax0_0_1 < 2; ++ax0_0_1) {
         {
