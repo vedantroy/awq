@@ -450,29 +450,49 @@ __global__ void __launch_bounds__(128)
     // Load values from shared memory (A_shared) to registers (A_shared_warp)
     // 8 loop iterations corresponds to 8 mma instructions
     // Watch the NVIDIA GTC 2020 talk for details
-    // Key point = values are broadcast from one thread to other threads in the warp
-    // (8 iters) * (128 bits) * (128 threads) / 16 (bits per fp16) = 8 * 128^2 / 16
     for (int k_0_1 = 0; k_0_1 < 2; ++k_0_1) {
+
+
+      // Broadcast A_shared to A_shared_warp
+      // 128 threads * (8 halfs * 4 iters/thread) -> 128 threads * 32 (size of A_shared_warp)
+      // Key point = values are broadcast from one thread to other threads in the warp
       for (int ax0_0 = 0; ax0_0 < 4; ++ax0_0) {
+        // Hypothesis:
+        // Chunks of 8 are loaded from A_shared
+        // and broadcast to aOff
         {
           unsigned int addr;
           __asm__ __volatile__(
            "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
            : "=r"(addr)
+           // l = .u64
            : "l"((void *)(
             A_shared 
+            // Row offset calculations
             // first half -> warps 0, 2; second half -> warps 1, 3
             + ((warpIdx % 2) * A_elems / 2)
             // Each 4 iterations of ax0_0 works on 1/4th of the 1/2
             + (ax0_0 * A_elems / 8)
+            + ((threadIdx.x % 16) * shared_stride) 
+
+            // Column offset calculations
+            // Left half or right half of the 1/4th
             + (k_0_1 * 16)
-            + ((threadIdx.x % 16) * shared_stride) + ((threadIdx.x / 16) * 8)
+            // The parenthesis are important, 
+            // - 1st 1/2 warp -> 0
+            // - 2nd 1/2 warp -> 8
+            + ((threadIdx.x / 16) * 8)
+
+            // fix ax0_0 = 0, k_0_1 = 0,1
+            // thd 0 -> (0, 0), (0, 16) 
+            // thd 1 -> (1, 0), (1, 16)
          )));
 
           unsigned* aOff = (unsigned *)(A_shared_warp + (ax0_0 * 8));
           __asm__ __volatile__(
             "ldmatrix.sync.aligned.m8n8.x4.shared.b16"
             "{%0, %1, %2, %3}, [%4];\n"
+            // r = .u32 (2 half)
             : "=r"(aOff[0]), "=r"(aOff[1]), "=r"(aOff[2]), "=r"(aOff[3])
             : "r"(addr)
           );
