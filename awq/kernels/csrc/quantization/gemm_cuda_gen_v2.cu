@@ -120,15 +120,12 @@ __global__ void __launch_bounds__(128)
   __shared__ half A_shared[128 * shared_stride];
 
    // for debugging, set everything to -1
-   for (int i = 0; i < 128 * (32 + 8); i++) {
-     A_shared[i] = __float2half(-1.0);
-   }
-   __syncthreads();
    if (threadIdx.x == 0 && threadIdx.y == 0) {
-    for (int i = 0; i < 128 * (32 + 8); i++) {
-      assert(A_shared[i] == __float2half(-1.0));
-    }
+     for (int i = 0; i < 128 * (32 + 8); i++) {
+       A_shared[i] = __float2half(-1.0);
+     }
    }
+    __syncthreads();
 
 
   // A matrix of size (64 x 32) (w/ 8 bytes of padding on the right hand side)
@@ -403,11 +400,6 @@ __global__ void __launch_bounds__(128)
     int* B_ptr_local = B_ptr + k_0_0 * (32 / 8);
 
     for (int ax0_ax1_fused_0 = 0; ax0_ax1_fused_0 < 2; ++ax0_ax1_fused_0) {
-
-      // B: 32 x 136 (128+8) float16
-      // each warp: 32 x 4
-      // each thr: read 32 bit -> convert to 8xFP16 (a UINT4) -> scale and minus zero -> WB UINT4
-      // row stride in shared memory: (NWARPS * 32 * 8 / cta_N) 
       int rowOff = ax0_ax1_fused_0 * row_stride;
       int B_loaded_current = *(B_ptr_local + rowOff * (IC / 8));
       int zeros_loaded = *(zeros_ptr_local + rowOff * zeros_w);
@@ -428,6 +420,10 @@ __global__ void __launch_bounds__(128)
       *(uint4*)(B_shared_ptr + rowOff * shared_stride) = *reinterpret_cast<uint4*>(B_loaded_fp16);
     }
     __syncthreads();
+
+    if (true) {
+    }
+
     // Load values from shared memory (A_shared) to registers (A_shared_warp)
     // 8 loop iterations corresponds to 8 mma instructions
     // Watch the NVIDIA GTC 2020 talk for details
