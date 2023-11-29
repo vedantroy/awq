@@ -116,12 +116,13 @@ __global__ void __launch_bounds__(128)
   // thd 31
   //     (31..63..32*3+31=127, 24) -> (31..63..127, 24)
 
+  #define A_rows 128
   #define shared_stride (32 + 8)
-  __shared__ half A_shared[128 * shared_stride];
+  __shared__ half A_shared[A_rows * shared_stride];
 
    // for debugging, set everything to -1
    if (threadIdx.x == 0 && threadIdx.y == 0) {
-     for (int i = 0; i < 128 * (32 + 8); i++) {
+     for (int i = 0; i < A_rows * shared_stride; i++) {
        A_shared[i] = __float2half(-1.0);
      }
    }
@@ -141,6 +142,13 @@ __global__ void __launch_bounds__(128)
   // block 1, split 0
 
   __shared__ half B_shared[64 * shared_stride];
+
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+    for (int i = 0; i < 64 * shared_stride; i++) {
+      B_shared[i] = __float2half(-1.0);
+    }
+  }
+  __syncthreads();
   
   // __shared__ half scaling_factors_shared[64];
   // __shared__ half zeros_shared[64];
@@ -149,7 +157,7 @@ __global__ void __launch_bounds__(128)
   int j_factors1 = ((OC + 64 - 1) / 64);
 
   int gridWidthBlocks = divide_round_up_gpu(OC, 64);
-  int gridHeightBlocks = divide_round_up_gpu(M, 128);
+  int gridHeightBlocks = divide_round_up_gpu(M, A_rows);
   int blocksPerGrid = gridHeightBlocks * gridWidthBlocks;
   int blockIdxInGrid = blockIdx.x % blocksPerGrid;
   int gridSplitIdx = blockIdx.x / blocksPerGrid;
@@ -195,12 +203,12 @@ __global__ void __launch_bounds__(128)
   // bool ld_zero_flag = (threadIdx.y * 32 + threadIdx.x) * 8 < 64;
   // bool wb_C_flag = (threadIdx.x / 4) < M;
 
-  int matrixRowsPerGridRow = 128;
+  int matrixRowsPerGridRow = A_rows;
   int gridRowIdx = blockIdxInGrid / gridWidthBlocks;
   // this might be an unnecessary var
   // 0, 128, 256, etc.
   int gridRowIdxAsMatrixRowIdx = gridRowIdx * matrixRowsPerGridRow;
-  assert(gridRowIdxAsMatrixRowIdx % 128 == 0);
+  assert(gridRowIdxAsMatrixRowIdx % A_rows == 0);
 
   static constexpr int threadsPerWarp = 32;
   static constexpr int rowsPerWarp = 8; // (32 * 8) / 32
@@ -358,7 +366,7 @@ __global__ void __launch_bounds__(128)
       __syncthreads();
       // Ensure A is right-padded w/ -1
       if (threadIdx.x == 0 && threadIdx.y == 0) {
-          for (int i = 0; i < 128; i++) {
+          for (int i = 0; i < A_rows; i++) {
             for (int j = 32; j < 40; j++) {
               assert(A_shared[i * 40 + j] == __float2half(-1.0));
             }
@@ -371,7 +379,7 @@ __global__ void __launch_bounds__(128)
         // ensure A_shared is equal to the first 128x32 chunk of A
         // (w/ zero padding for out of bound rows)
         bool failed = false;
-        for (int i = 0; i < min(M, 128); ++i) {
+        for (int i = 0; i < min(M, A_rows); ++i) {
           for (int j = 0; j < 32; ++j) {
             if (A_shared[i * 40 + j] !=  A[i * IC + j]) {
               // printf("i: %d, j: %d, A_shared: %f, A: %f\n", i, j, __half2float(A_shared[i * 40 + j]), __half2float(A[i * IC + j]));
@@ -380,7 +388,7 @@ __global__ void __launch_bounds__(128)
           }
         }
         // Ensure zero padding works
-        for (int i = M; i < 128; ++i) {
+        for (int i = M; i < A_rows; ++i) {
           for (int j = 0; j < 32; ++j) {
             if (A_shared[i * 40 + j] != __float2half(0)) {
               // printf("i: %d, j: %d, A_shared: %f\n", i, j, __half2float(A_shared[i * 40 + j]));
@@ -422,6 +430,19 @@ __global__ void __launch_bounds__(128)
     __syncthreads();
 
     if (true) {
+      // ensure B is left-padded w/ -1
+      if (threadIdx.x == 0 && threadIdx.y == 0) {
+          for (int i = 0; i < 64; i++) {
+            for (int j = 32; j < 40; j++) {
+              assert(B_shared[i * 40 + j] == __float2half(-1.0));
+            }
+          }
+
+          // int gridColIdx = blockIdxInGrid % gridWidthBlocks;
+          // if (gridColIdx == 0 && k_0_0 == 0) {
+          // }
+      }
+
     }
 
     // Load values from shared memory (A_shared) to registers (A_shared_warp)
@@ -432,22 +453,60 @@ __global__ void __launch_bounds__(128)
     for (int k_0_1 = 0; k_0_1 < 2; ++k_0_1) {
       for (int ax0_0 = 0; ax0_0 < 4; ++ax0_0) {
         {
+          /*
+          // Constants for understanding the structure of A_shared
+          const int elementsPerRow = 40;
+          const int rowsPerHalf = 64;
+          const int rowsPerQuarter = rowsPerHalf / 2;
+          const int rowsPerEighth = rowsPerQuarter / 2;
+          const int segmentsPerRow = 16;
+          const int elementsPerSegment = 40;
+          const int subSegmentsPerSegment = 2;
+          const int elementsPerSubSegment = 8;
+          
+          // Calculate the row offset
+          int halfIndex = threadIdx.y & 1;
+          int quarterIndex = ax0_0;
+          int eighthIndex = k_0_1;
+          int rowOffset = (halfIndex * rowsPerHalf + quarterIndex * rowsPerQuarter + eighthIndex * rowsPerEighth) * elementsPerRow;
+          
+          // Calculate the column offset
+          int segmentIndex = threadIdx.x & (segmentsPerRow - 1);
+          int subSegmentIndex = threadIdx.x >> 4;
+          int columnOffset = segmentIndex * elementsPerSegment + subSegmentIndex * elementsPerSubSegment;
+          
+          // Calculate the total offset
+          int offset = rowOffset + columnOffset;
+          
+          // Access the element at the calculated offset
+          half* element = &(A_shared[offset]);
+
+
           unsigned int addr;
           __asm__ __volatile__(
             "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
             : "=r"(addr)
-            : "l"((void *)(
-              (&(A_shared[((((((int)threadIdx.y) & 1) * 2560) + (ax0_0 * 640)) + (k_0_1 * 16))])) + 
-              (((((int)threadIdx.x) & 15) * 40) + ((((int)threadIdx.x) >> 4) * 8))))
+            : "l"((void *)element)
           );
+          */
+
+          unsigned int addr;
+          __asm__ __volatile__(
+           "{ .reg .u64 addr; cvta.to.shared.u64 addr, %1; cvt.u32.u64 %0, addr; }\n"
+           : "=r"(addr)
+           : "l"((void *)(
+             (&(A_shared[((
+              ((((int)threadIdx.y) & 1) * 2560) 
+              + (ax0_0 * 640)) + (k_0_1 * 16))])) + 
+             (((((int)threadIdx.x) & 15) * 40) + ((((int)threadIdx.x) >> 4) * 8))))
+         );
+
 
           unsigned* aOff = (unsigned *)(A_shared_warp + (ax0_0 * 8));
-
           __asm__ __volatile__(
             "ldmatrix.sync.aligned.m8n8.x4.shared.b16"
             "{%0, %1, %2, %3}, [%4];\n"
             : "=r"(aOff[0]), "=r"(aOff[1]), "=r"(aOff[2]), "=r"(aOff[3])
-            // : "=r"(((unsigned *)(A_shared_warp + (ax0_0 * 8)))[0]), "=r"(((unsigned *)(A_shared_warp + (ax0_0 * 8)))[1]), "=r"(((unsigned *)(A_shared_warp + (ax0_0 * 8)))[2]), "=r"(((unsigned *)(A_shared_warp + (ax0_0 * 8)))[3])
             : "r"(addr)
           );
         }
