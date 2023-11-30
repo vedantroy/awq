@@ -578,6 +578,20 @@ __global__ void __launch_bounds__(128)
           );
           #undef eq
         }
+
+        if (threadIdx.x == 1 
+            && (warpIdx == 0 || warpIdx == 1) 
+            && k_0_1 == 0) {
+          #define eq(i,j) (B_shared_warp[i] == B_shared[j])
+          // ax0_0 = 0
+          assert(
+            eq(0, 2) && eq(1, 3)
+            // && eq(2, 8) && eq(3, 8 + 1)
+            // && eq(4, 8 * shared_stride) && eq(5, (8 * shared_stride) + 1)
+            // && eq(6, (8 * shared_stride) + 8) && eq(7, (8 * shared_stride) + 8 + 1)
+          );
+          #undef eq
+        }
       }
           
       for (int warpRow = 0; warpRow < 4; ++warpRow) {
