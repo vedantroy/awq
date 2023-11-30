@@ -650,17 +650,17 @@ __global__ void __launch_bounds__(128)
     
 // Haotian: Here (May 29 11:46AM PST)
 // TODO: Shang: Hoist loop invariance.
-  for (int ax0_0_2 = 0; ax0_0_2 < 4; ++ax0_0_2) {
-    for (int ax1_0 = 0; ax1_0 < 2; ++ax1_0) {
+  for (int C_row_idx = 0; C_row_idx < 4; ++C_row_idx) {
+    for (int axis1_half_idx = 0; axis1_half_idx < 2; ++axis1_half_idx) {
       for (int local_id = 0; local_id < 8; ++local_id) {
-        int row_offset = (((int)blockIdx_y) / j_factors1) * 128 
-                           + (threadIdx.y % 2) * 64 
-                           + ax0_0_2 * 16 
+        int row_offset = (gridRowIdx * A_rows)
+                           + (warpIdx % 2) * (A_rows / 2) 
+                           + C_row_idx * ((A_rows / 2) / 4)
                            + (local_id % 4) / 2 * 8 
-                           + ((int)threadIdx.x) / 4;
+                           + (threadIdx.x) / 4;
         if (row_offset < M)
         {
-          *(C_ptr + ax1_0 * 16 + row_offset * OC + (local_id / 4) * 8 + local_id % 2) = __float2half(C_warp[(ax0_0_2 * 16) + (ax1_0 * 8) + local_id]);
+          *(C_ptr + axis1_half_idx * 16 + row_offset * OC + (local_id / 4) * 8 + local_id % 2) = __float2half(C_warp[(C_row_idx * 16) + (axis1_half_idx * 8) + local_id]);
         }
       }
     }
