@@ -656,11 +656,17 @@ __global__ void __launch_bounds__(128)
         int row_offset = (gridRowIdx * A_rows)
                            + (warpIdx % 2) * (A_rows / 2) 
                            + C_row_idx * ((A_rows / 2) / 4)
-                           + (local_id % 4) / 2 * 8 
+                           + ((local_id % 4) / 2) * 8 
                            + (threadIdx.x) / 4;
         if (row_offset < M)
         {
-          *(C_ptr + axis1_half_idx * 16 + row_offset * OC + (local_id / 4) * 8 + local_id % 2) = __float2half(C_warp[(C_row_idx * 16) + (axis1_half_idx * 8) + local_id]);
+          *(C_ptr 
+              + row_offset * OC
+              + (axis1_half_idx * 16)
+              + (local_id / 4) * 8
+              + local_id % 2) = __float2half(
+                  C_warp[(C_row_idx * 16) + (axis1_half_idx * 8) + local_id]
+            );
         }
       }
     }
