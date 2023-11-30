@@ -571,10 +571,10 @@ __global__ void __launch_bounds__(128)
           #define eq(i,j) (B_shared_warp[i] == B_shared[j])
           // ax0_0 = 0
           assert(
-            // left cell
             eq(0, 0) && eq(1, 1)
             && eq(2, 8) && eq(3, 8 + 1)
-            // && eq(4, 8 * shared_stride) && eq(5, (8 * shared_stride) + 1)
+            && eq(4, 8 * shared_stride) && eq(5, (8 * shared_stride) + 1)
+            && eq(6, (8 * shared_stride) + 8) && eq(7, (8 * shared_stride) + 8 + 1)
           );
           #undef eq
         }
