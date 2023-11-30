@@ -583,12 +583,12 @@ __global__ void __launch_bounds__(128)
       for (int warpRow = 0; warpRow < 4; ++warpRow) {
         // Each loop iteration loads 4 unsigned (8 halfs)
         // `warpRow * 8` advances the pointer by 8 halfs
-        unsigned* aSharedPtr = (unsigned *)(A_shared_warp + (warpRow * 8));
+        unsigned* a = (unsigned *)(A_shared_warp + (warpRow * 8));
         for (int warpCol = 0; warpCol < 2; ++warpCol) {
       
             int cWarpBaseIndex = (warpRow * 16) + (warpCol * 8);
-            unsigned* bSharedPtr = (unsigned *)(B_shared_warp + (warpCol * 8));
-            float* cWarpPtr1 = (float *)(C_warp + cWarpBaseIndex);
+            unsigned* b = (unsigned *)(B_shared_warp + (warpCol * 8));
+            float* c = (float *)(C_warp + cWarpBaseIndex);
 
             // https://www.reddit.com/r/CUDA/comments/qk9rbs/i_dont_understand_how_cuda_kernel_works_within/
             // tensor core instructions operate on an entire warp
@@ -615,22 +615,22 @@ __global__ void __launch_bounds__(128)
             __asm__ __volatile__(
                 "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n"
-                : "=f"(cWarpPtr1[0]), "=f"(cWarpPtr1[1]), "=f"(cWarpPtr1[2]), "=f"(cWarpPtr1[3])
-                : "r"(aSharedPtr[0]), "r"(aSharedPtr[1]), "r"(aSharedPtr[2]), "r"(aSharedPtr[3]), 
-                  "r"(bSharedPtr[0]), "r"(bSharedPtr[1]), 
-                  "f"(cWarpPtr1[0]), "f"(cWarpPtr1[1]), "f"(cWarpPtr1[2]), "f"(cWarpPtr1[3])
+                : "=f"(c[0]), "=f"(c[1]), "=f"(c[2]), "=f"(c[3])
+                : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), 
+                  "r"(b[0]), "r"(b[1]), 
+                  "f"(c[0]), "f"(c[1]), "f"(c[2]), "f"(c[3])
             );
 
-            unsigned* bSharedPtrOffset = bSharedPtr + 2;
-            float* cWarpPtr2 = cWarpPtr1 + 4;
+            unsigned* b2 = b + 2;
+            float* c2 = c + 4;
 
             __asm__ __volatile__(
                 "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"
                 "{%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\n"
-                : "=f"(cWarpPtr2[0]), "=f"(cWarpPtr2[1]), "=f"(cWarpPtr2[2]), "=f"(cWarpPtr2[3])
-                : "r"(aSharedPtr[0]), "r"(aSharedPtr[1]), "r"(aSharedPtr[2]), "r"(aSharedPtr[3]), 
-                  "r"(bSharedPtrOffset[0]), "r"(bSharedPtrOffset[1]), 
-                  "f"(cWarpPtr2[0]), "f"(cWarpPtr2[1]), "f"(cWarpPtr2[2]), "f"(cWarpPtr2[3])
+                : "=f"(c2[0]), "=f"(c2[1]), "=f"(c2[2]), "=f"(c2[3])
+                : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), 
+                  "r"(b2[0]), "r"(b2[1]), 
+                  "f"(c2[0]), "f"(c2[1]), "f"(c2[2]), "f"(c2[3])
             );
         }
       }
