@@ -543,10 +543,12 @@ __global__ void __launch_bounds__(128)
             : "=r"(addr)
             : "l"((void *)(
               B_shared
+              // row offset
               + (warpIdx / 2) * (B_elems / 2)
               + ax0_0_1 * ((B_elems / 2) / 2)
               + (threadIdx.x / 16) * (B_elems / 8)
               + (threadIdx.x % 8) * shared_stride
+              // column offset
               + k_0_1 * 16
               + ((threadIdx.x % 16) / 8) * 8
           )));
@@ -558,6 +560,28 @@ __global__ void __launch_bounds__(128)
             : "=r"(bOff[0]), "=r"(bOff[1]), "=r"(bOff[2]), "=r"(bOff[3])
             : "r"(addr)
           );
+        }
+      }
+
+      if (true) {
+        __syncthreads();
+        if (threadIdx.x == 0 
+            && (warpIdx == 0 || warpIdx == 1) 
+            && k_0_1 == 0) {
+          #define eq(i,j) (B_shared_warp[i] == B_shared[j])
+          // ax0_0 = 0
+          assert(
+            // left cell
+            eq(0, 0) && eq(1, 1)
+            // && eq(2, 8) && eq(3, 8 + 1)
+            // && eq(2, 8 * shared_stride) && eq(3, (8 * shared_stride) + 1)
+          );
+          // assert(
+            // right cell
+            // eq(4, 8) && eq(5, 8 + 1)
+            // && eq(6, (8 * shared_stride) + 8) && eq(7, (8 * shared_stride) + 8 + 1)
+          // );
+          #undef eq
         }
       }
           
