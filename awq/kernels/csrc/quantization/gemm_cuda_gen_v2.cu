@@ -543,10 +543,10 @@ __global__ void __launch_bounds__(128)
             : "=r"(addr)
             : "l"((void *)(
               B_shared
-              + (threadIdx.y / 2) * 1280
-              + ax0_0_1 * 640
+              + (warpIdx / 2) * (B_elems / 2)
+              + ax0_0_1 * ((B_elems / 2) / 2)
               + (threadIdx.x / 16) * 320
-              + (threadIdx.x % 8) * 40
+              + (threadIdx.x % 8) * shared_stride
               + k_0_1 * 16
               + ((threadIdx.x % 16) / 8) * 8
           )));
