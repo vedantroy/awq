@@ -573,14 +573,9 @@ __global__ void __launch_bounds__(128)
           assert(
             // left cell
             eq(0, 0) && eq(1, 1)
-            // && eq(2, 8) && eq(3, 8 + 1)
-            // && eq(2, 8 * shared_stride) && eq(3, (8 * shared_stride) + 1)
+            && eq(2, 8) && eq(3, 8 + 1)
+            // && eq(4, 8 * shared_stride) && eq(5, (8 * shared_stride) + 1)
           );
-          // assert(
-            // right cell
-            // eq(4, 8) && eq(5, 8 + 1)
-            // && eq(6, (8 * shared_stride) + 8) && eq(7, (8 * shared_stride) + 8 + 1)
-          // );
           #undef eq
         }
       }
