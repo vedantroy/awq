@@ -461,9 +461,6 @@ __global__ void __launch_bounds__(128)
       // Note: Each iteration of k_0_1 loop loads the entire A_shared matrix
       // (which makes me wonder what k_0_1 is doing)
       for (int ax0_0 = 0; ax0_0 < 4; ++ax0_0) {
-        // Hypothesis:
-        // Chunks of 8 are loaded from A_shared
-        // and broadcast to aOff
         {
           unsigned int addr;
           __asm__ __volatile__(
@@ -656,7 +653,11 @@ __global__ void __launch_bounds__(128)
   for (int ax0_0_2 = 0; ax0_0_2 < 4; ++ax0_0_2) {
     for (int ax1_0 = 0; ax1_0 < 2; ++ax1_0) {
       for (int local_id = 0; local_id < 8; ++local_id) {
-        int row_offset = (((int)blockIdx_y) / j_factors1) * 128 + (threadIdx.y % 2) * 64 + ax0_0_2 * 16 + (local_id % 4) / 2 * 8 + ((int)threadIdx.x) / 4;
+        int row_offset = (((int)blockIdx_y) / j_factors1) * 128 
+                           + (threadIdx.y % 2) * 64 
+                           + ax0_0_2 * 16 
+                           + (local_id % 4) / 2 * 8 
+                           + ((int)threadIdx.x) / 4;
         if (row_offset < M)
         {
           *(C_ptr + ax1_0 * 16 + row_offset * OC + (local_id / 4) * 8 + local_id % 2) = __float2half(C_warp[(ax0_0_2 * 16) + (ax1_0 * 8) + local_id]);
