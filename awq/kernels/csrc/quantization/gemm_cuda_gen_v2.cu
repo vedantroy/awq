@@ -545,7 +545,7 @@ __global__ void __launch_bounds__(128)
               B_shared
               + (warpIdx / 2) * (B_elems / 2)
               + ax0_0_1 * ((B_elems / 2) / 2)
-              + (threadIdx.x / 16) * 320
+              + (threadIdx.x / 16) * (B_elems / 8)
               + (threadIdx.x % 8) * shared_stride
               + k_0_1 * 16
               + ((threadIdx.x % 16) / 8) * 8
