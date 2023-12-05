@@ -653,17 +653,29 @@ __global__ void __launch_bounds__(128)
   for (int C_row_idx = 0; C_row_idx < 4; ++C_row_idx) {
     for (int axis1_half_idx = 0; axis1_half_idx < 2; ++axis1_half_idx) {
       for (int local_id = 0; local_id < 8; ++local_id) {
+        // A single row of C looks like this:
+        // (F0 F1) (F2 F3)   (F4 F5) (F6 F7)  (F8 F9) (F10 F11)  (F12 F13) (F14 F15)
+        // Groups of 2 (parens) are written to adjacent columns, same row in C
+        // Groups of 4 are the accumulated values from an mma instruction
+        // In a group of 4, (F2 F3) is written 8 rows below (F0 F1) (but same coluns)
+
         int row_offset = (gridRowIdx * A_rows)
+                           // In A, warps 0, 2 handle top half
+                           // warps 1, 3 handle bottom half
                            + (warpIdx % 2) * (A_rows / 2) 
                            + C_row_idx * ((A_rows / 2) / 4)
+                           // The second group of 2 is written 8 rows below the first
                            + ((local_id % 4) / 2) * 8 
                            + (threadIdx.x) / 4;
         if (row_offset < M)
         {
           *(C_ptr 
               + row_offset * OC
+              // Left half is written from 0-16, right-half from 16-32
               + (axis1_half_idx * 16)
+              // Each group of 4 within a half is offset by 8
               + (local_id / 4) * 8
+              // Adjacent floats are written in adjacent columns
               + local_id % 2) = __float2half(
                   C_warp[(C_row_idx * 16) + (axis1_half_idx * 8) + local_id]
             );
@@ -672,6 +684,13 @@ __global__ void __launch_bounds__(128)
     }
   }
 }
+
+// My updated shapes for what's going on here:
+// IC = K, OC = N
+// in_feats: M, K
+// kernel: N, K // 8 -> cast to N, K
+// scaling: N, K // G
+// zeros: N, K // G // 8
 
 // in_feats: M, IC [float16]
 // kernel: OC, IC // 8 [int32] -> cast to OC, IC [uint4b]
